@@ -1,0 +1,36 @@
+/* Valeurs de style du Studio, définies à un seul endroit. Outil personnel : thème sombre,
+   inspiré de la DA du jeu (bordeaux, or vieilli, noir chaud, crème). */
+:root {
+  --fond: #121110;
+  --fond-2: #1a1816;
+  --panneau: #201e1b;
+  --panneau-2: #282520;
+  --bordure: #36322c;
+  --bordure-forte: #4a453d;
+  --texte: #ece6da;
+  --texte-2: #b9b1a3;
+  --texte-3: #8a8378;
+  --or: #d4ad5a;
+  --or-sombre: #9c7c37;
+  --bordeaux: #8e2b36;
+  --bordeaux-clair: #b8404d;
+  --ok: #72b36b;
+  --attention: #e0a93e;
+  --erreur: #e06a5e;
+  --info: #6aa7d6;
+
+  --onde: #7c7568;
+  --onde-voice: #d4ad5a;
+  --tete-lecture: #f4efe6;
+  --selection: rgba(212, 173, 90, 0.18);
+
+  --police: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --police-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --taille: 14px;
+  --taille-petite: 12.5px;
+
+  --rayon: 8px;
+  --rayon-petit: 5px;
+  --espace: 16px;
+  --ombre: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
