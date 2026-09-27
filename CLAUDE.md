@@ -29,14 +29,18 @@ Configuration facultative dans `.env` (voir `.env.example`) : dossiers, port, mo
 ```
 commun/        logique pure partagée serveur / interface, testée : types, temps, répliques,
                recettes d'encodage (ce qui est à refaire), construction des JSON publiés, VAD
-server/        serveur local : routes (API), travaux (workflow), ffmpeg, python, publication (git),
-               contrôle, tâches de fond (suivies en direct par SSE), projets (espace de travail)
+server/        serveur local : routes (API), travaux (workflow), ffmpeg, python, retouche (export et
+               import de pistes), publication (git), contrôle, dialogues (fenêtres « Ouvrir » de
+               Windows), fichiers (recherche d'une vidéo glissée), tâches de fond (suivies en direct
+               par SSE), projets (espace de travail)
 python/        scripts appelés par le serveur : separer.py, transcrire.py, outils.py
 web/src/       interface : ecrans/ (bibliothèque, projet), etapes/ (les 8 étapes), composants/, lib/
 tests/         tests Vitest
 ```
 
-Un projet vit dans `../studio-workspace/<id>/` : `projet.json` (l'état), `apercu.mp4` (sources illisibles par le navigateur), `pics.bin` (forme d'onde de la source), `mix.wav` (audio de la plage), `separations/<id>/{voice,bed}.wav`, `transcription.json`, `sortie/` (médias encodés).
+Un projet vit dans `../studio-workspace/<id>/` : `projet.json` (l'état), `apercu.mp4` (sources illisibles par le navigateur), `pics.bin` (forme d'onde de la source), `mix.wav` (audio de la plage), `separations/<id>/{voice,bed}.wav`, `imports/<id>.wav` (pistes retouchées, mises aux normes), `export/` (copies téléchargées), `transcription.json`, `sortie/` (médias encodés). `../studio-workspace/_sources/` garde les copies de vidéos glissées introuvables sur le disque.
+
+L'identifiant d'un extrait est son titre mis en forme ; tant que l'extrait n'est pas publié, changer le titre renomme le projet (et son dossier).
 
 ## Règles
 
@@ -50,6 +54,7 @@ Un projet vit dans `../studio-workspace/<id>/` : `projet.json` (l'état), `aperc
 - **Fichiers de travail** dans `../studio-workspace/<id>/`, jamais dans un dépôt git. Les vidéos sources ne sont jamais copiées dans un dépôt : on garde seulement leur empreinte (sha256) dans `fabrication.json`.
 - **Publication** : écrire dans `../extraits/`, régénérer `catalogue.json`, puis commit et push dans ce dépôt-là, avec un message clair (« Ajout de <id> », « <id> : répliques corrigées »). Toujours montrer ce qui va être publié avant de pousser. Pour tester sans toucher au vrai dépôt : `DOSSIER_EXTRAITS` vers un clone jetable dont le `origin` est un dépôt nu local.
 - Préparer le passage des médias sur Cloudflare R2 (fiche 7.9) : l'envoi des médias passe par une seule fonction, `envoyerMedias()` dans `server/publication.ts`, qu'on redirigera vers R2.
-- Sécurité : le serveur n'écoute que `127.0.0.1`, refuse les requêtes dont l'en-tête `Host` n'est pas local, et exige du JSON pour les corps de requête (pas de requête « simple » depuis une page tierce).
+- **Fichiers servis** : toujours par `envoyerFichier()` (`server/http.ts`), qui referme le fichier même si le navigateur abandonne la requête (ce que Chrome fait sans arrêt avec la vidéo). Un fichier resté ouvert bloque sous Windows son remplacement, le renommage ou la suppression du projet.
+- Sécurité : le serveur n'écoute que `127.0.0.1`, refuse les requêtes dont l'en-tête `Host` n'est pas local, et exige du JSON pour les corps de requête (pas de requête « simple » depuis une page tierce). Les envois binaires (copie d'une vidéo, import d'une piste) exigent l'en-tête `x-studio: 1`, pour la même raison.
 - Secrets (jeton R2 plus tard) : uniquement dans `.env`, jamais commités.
 - L'éditeur de répliques (`web/src/composants/EditeurRepliques.svelte`) et la VAD (`commun/vad.ts`) reprennent l'Atelier de la V2 (https://github.com/loucalm/Dubbattle-V2 : `RegionEditor.tsx`, `lib/vad.ts`).

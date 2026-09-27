@@ -39,6 +39,7 @@ export function exempleProjet(): Projet {
         cree_le: "2026-09-27T10:05:00.000Z",
       },
     ],
+    imports: [],
     voice: { origine: "separation", separation: "s1" },
     bed: { origine: "separation", separation: "s1" },
     personnages: [
@@ -53,7 +54,6 @@ export function exempleProjet(): Projet {
     prochain_id_replique: 3,
     infos: {
       titre: "La proue du Titanic",
-      source: "Titanic (1997)",
       categorie: "Film",
       tags: ["romance", "culte"],
       langue: "fr",

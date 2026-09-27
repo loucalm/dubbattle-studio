@@ -7,16 +7,19 @@ import { config } from "./config.ts";
 import { controler } from "./controle.ts";
 import { abonner } from "./evenements.ts";
 import { capturerImage, nvencDisponible, PICS_PAR_SECONDE } from "./ffmpeg.ts";
-import { chercherParNomEtTaille, ecrireReglages, listerDossier, lireReglages } from "./fichiers.ts";
+import { dialoguesDisponibles, ouvrirDialogue, type TypeDialogue } from "./dialogues.ts";
+import { chercherParNomEtTaille, dossiersUtilisateur, ecrireReglages, listerDossier, lireReglages, televerser } from "./fichiers.ts";
 import { envoyerFichier, Routeur } from "./http.ts";
 import { executer } from "./processus.ts";
 import { chemins, ErreurHttp, lireProjet, listerProjets, projetExiste, renommerProjet, supprimerProjet } from "./projets.ts";
 import { apercuPublication, lancerPublication } from "./publication.ts";
+import { exporterPiste, recevoirImport, supprimerImport, validerImport } from "./retouche.ts";
 import { etatPython } from "./python.ts";
 import { annulerTache, annulerTachesProjet, listerTaches, tachesActives } from "./taches.ts";
 import {
   appliquerModification,
   creerProjet,
+  identifiantPourTitre,
   dossierExtraitPublie,
   lancerEncodage,
   lancerRechercheSource,
@@ -31,8 +34,8 @@ import {
   wavPiste,
 } from "./travaux.ts";
 import { etatMedia } from "../commun/encodage.ts";
-import { identifiantDepuisFichier, identifiantLibre, identifiantValide } from "../commun/identifiants.ts";
 import { MODELES_SEPARATION } from "../commun/modeles.ts";
+import { CATEGORIES } from "../commun/publication.ts";
 import { MEDIAS, type EtatOutils, type ExtraitPublie, type InfoJson, type Media, type ModificationProjet } from "../commun/types.ts";
 
 export const routeur = new Routeur();
@@ -87,6 +90,8 @@ routeur.get("/api/etat", async ({ query }) => {
     dossiers: { extraits: config.dossierExtraits, espace: config.dossierEspace, modeles: config.dossierModeles },
     url_extraits: config.urlExtraits,
     extraits_present: existsSync(join(config.dossierExtraits, "schema")),
+    dialogues_natifs: dialoguesDisponibles,
+    dossiers_utilisateur: await dossiersUtilisateur(),
     modeles_separation: MODELES_SEPARATION,
     taches: listerTaches(),
   };
@@ -112,6 +117,22 @@ routeur.get("/api/fichiers", async ({ query }) => {
 routeur.post("/api/fichiers/chercher", async ({ corps }) => {
   const { nom, taille } = (await corps()) as { nom?: string; taille?: number };
   return { chemins: await chercherParNomEtTaille(texte(nom, "nom"), Number(taille)) };
+});
+
+routeur.post("/api/dialogue", async ({ corps }) => {
+  const { type, titre } = (await corps()) as { type?: TypeDialogue; titre?: string };
+  if (!type || !["video", "audio", "dossier"].includes(type)) throw new ErreurHttp(400, "Type de fenêtre inconnu.");
+  return { chemin: await ouvrirDialogue(type, titre ?? "Choisir") };
+});
+
+/** Copie d'une vidéo glissée qu'on ne retrouve pas sur le disque (corps binaire). */
+routeur.post("/api/televersement", async ({ req, query }) => {
+  // en-tête personnalisé : une page web tierce ne peut pas l'envoyer sans autorisation du Studio
+  if (req.headers["x-studio"] !== "1") throw new ErreurHttp(403, "Requête refusée.");
+  const nom = texte(query.get("nom"), "nom");
+  const taille = Number(query.get("taille"));
+  if (!Number.isFinite(taille) || taille <= 0) throw new ErreurHttp(400, "Taille invalide.");
+  return { chemin: await televerser(nom, taille, req) };
 });
 
 routeur.get("/api/taches", () => listerTaches());
@@ -141,7 +162,7 @@ routeur.get("/api/bibliotheque", async () => ({ projets: await listerProjets(), 
 
 /** Catégories et tags déjà utilisés, pour les proposer à la saisie. */
 routeur.get("/api/vocabulaire", async () => {
-  const categories = new Set<string>(["Film", "Série", "Animation", "Mème"]);
+  const categories = new Set<string>(CATEGORIES);
   const tags = new Set<string>();
   try {
     const catalogue = JSON.parse(await readFile(join(config.dossierExtraits, "catalogue.json"), "utf8")) as {
@@ -154,13 +175,12 @@ routeur.get("/api/vocabulaire", async () => {
   } catch {
     // pas de catalogue
   }
-  return { categories: [...categories].sort(), tags: [...tags].sort() };
+  return { categories: [...categories], tags: [...tags].sort() };
 });
 
 routeur.post("/api/identifiant", async ({ corps }) => {
-  const { nom } = (await corps()) as { nom?: string };
-  const pris = new Set([...(await listerProjets()).map((p) => p.id), ...(await extraitsPublies()).map((e) => e.id)]);
-  return { id: identifiantLibre(identifiantDepuisFichier(texte(nom, "nom")), pris) };
+  const { titre, nom } = (await corps()) as { titre?: string; nom?: string };
+  return { id: await identifiantPourTitre(titre ?? "", nom ?? "extrait") };
 });
 
 // ---------------------------------------------------------------------------
@@ -168,8 +188,8 @@ routeur.post("/api/identifiant", async ({ corps }) => {
 // ---------------------------------------------------------------------------
 
 routeur.post("/api/projets", async ({ corps }) => {
-  const { chemin, id } = (await corps()) as { chemin?: string; id?: string };
-  return creerProjet(texte(chemin, "chemin").replace(/^"|"$/g, ""), texte(id, "id"));
+  const { chemin, titre } = (await corps()) as { chemin?: string; titre?: string };
+  return creerProjet(texte(chemin, "chemin").replace(/^"|"$/g, ""), texte(titre, "titre"));
 });
 
 routeur.post("/api/publies/:id/ouvrir", ({ params }) => ouvrirExtraitPublie(params.id));
@@ -196,11 +216,13 @@ routeur.delete("/api/projets/:id", async ({ params }) => {
   await supprimerProjet(params.id);
 });
 
+/** Tant que l'extrait n'est pas publié, son identifiant suit son titre. */
 routeur.post("/api/projets/:id/renommer", async ({ params, corps }) => {
-  const { id } = (await corps()) as { id?: string };
-  const nouvelId = texte(id, "id");
-  if (!identifiantValide(nouvelId)) throw new ErreurHttp(400, "Identifiant invalide : minuscules, chiffres et tirets.");
-  if (existsSync(dossierExtraitPublie(nouvelId))) throw new ErreurHttp(409, `« ${nouvelId} » est déjà publié.`);
+  const { titre } = (await corps()) as { titre?: string };
+  const p = await lireProjet(params.id);
+  if (p.publication) return { id: p.id };
+  const nouvelId = await identifiantPourTitre(texte(titre, "titre"), p.source.nom, p.id);
+  if (nouvelId === p.id) return { id: p.id };
   sansTacheEnCours(params.id);
   await renommerProjet(params.id, nouvelId);
   return { id: nouvelId };
@@ -230,7 +252,10 @@ routeur.get("/api/projets/:id/media/:quoi", async ({ req, res, params }) => {
   else if (quoi === "mix") fichier = c.mix;
   else if (quoi === "voice" || quoi === "bed") fichier = wavPiste(p, quoi);
   else if (quoi.startsWith("sortie-")) fichier = p.sortie[quoi.slice(7) as Media]?.fichier ?? null;
-  else if (quoi.startsWith("separation-")) {
+  else if (quoi.startsWith("import-")) {
+    const iid = quoi.slice(7);
+    if (p.imports.some((i) => i.id === iid)) fichier = c.importWav(iid);
+  } else if (quoi.startsWith("separation-")) {
     // separation-<id>-voice / separation-<id>-bed
     const m = /^separation-(.+)-(voice|bed)$/.exec(quoi);
     if (m && p.separations.some((s) => s.id === m[1])) fichier = join(c.separation(m[1]), `${m[2]}.wav`);
@@ -281,6 +306,30 @@ routeur.delete("/api/projets/:id/separations/:sid", async ({ params }) => {
   sansTacheEnCours(params.id);
   return supprimerSeparation(params.id, params.sid);
 });
+
+/** Copie d'une piste de l'étape 3 à retoucher dans un autre logiciel (téléchargement). */
+routeur.get("/api/projets/:id/export/:piste", async ({ req, res, params }) => {
+  const { chemin, nom } = await exporterPiste(params.id, params.piste);
+  res.setHeader("content-disposition", `attachment; filename="${nom.replace(/[^\x20-\x7e]|"/g, "_")}"; filename*=UTF-8''${encodeURIComponent(nom)}`);
+  await envoyerFichier(req, res, chemin);
+});
+
+/** Piste retouchée ailleurs (corps binaire) : mesure et recherche du décalage, avant validation. */
+routeur.post("/api/projets/:id/imports", async ({ req, params, query }) => {
+  if (req.headers["x-studio"] !== "1") throw new ErreurHttp(403, "Requête refusée.");
+  const quoi = query.get("quoi");
+  if (quoi !== "voice" && quoi !== "bed") throw new ErreurHttp(400, "Préciser voice ou bed.");
+  sansTacheEnCours(params.id);
+  return recevoirImport(params.id, quoi, texte(query.get("nom"), "nom"), req);
+});
+
+routeur.post("/api/projets/:id/imports/:iid/valider", async ({ params, corps }) => {
+  const { decalage_ms } = (await corps()) as { decalage_ms?: number };
+  sansTacheEnCours(params.id);
+  return validerImport(params.id, params.iid, Number(decalage_ms ?? 0));
+});
+
+routeur.delete("/api/projets/:id/imports/:iid", ({ params }) => supprimerImport(params.id, params.iid));
 
 routeur.post("/api/projets/:id/transcription", ({ params }) => lancerTranscription(params.id));
 

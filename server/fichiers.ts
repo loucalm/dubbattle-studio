@@ -2,11 +2,12 @@
 // source déplacée ou renommée (par taille puis empreinte), et réglages du Studio.
 
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
-import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
-import { dirname, extname, join, parse, resolve } from "node:path";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import { config } from "./config.ts";
-import { Annulation } from "./processus.ts";
+import { Annulation, executer } from "./processus.ts";
 import type { EntreeDossier } from "../commun/types.ts";
 
 export const EXTENSIONS_VIDEO = new Set([".mp4", ".mkv", ".mov", ".webm", ".m4v", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".flv"]);
@@ -87,12 +88,51 @@ export async function listerDossier(chemin?: string): Promise<ContenuDossier> {
 // Recherche de fichiers
 // ---------------------------------------------------------------------------
 
-/** Parcourt les dossiers sources (profondeur limitée) et renvoie les fichiers qui passent le filtre. */
+/** Copies de vidéos glissées dans la fenêtre mais introuvables sur le disque (voir televerser). */
+export const dossierCopies = () => join(config.dossierEspace, "_sources");
+
+let dossiersPersonnels: Promise<string[]> | null = null;
+
+/** Téléchargements, Vidéos, Bureau et Documents de l'utilisateur (vrais emplacements, OneDrive compris). */
+export function dossiersUtilisateur(): Promise<string[]> {
+  dossiersPersonnels ??= (async () => {
+    const maison = homedir();
+    let dossiers = ["Downloads", "Videos", "Desktop", "Documents"].map((d) => join(maison, d));
+    if (process.platform === "win32") {
+      const script = [
+        "$ProgressPreference = 'SilentlyContinue'",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path",
+        "[Environment]::GetFolderPath('MyVideos')",
+        "[Environment]::GetFolderPath('Desktop')",
+        "[Environment]::GetFolderPath('MyDocuments')",
+      ].join("; ");
+      try {
+        const { stdout } = await executer("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+        const trouves = stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[A-Za-z]:\\/.test(l));
+        if (trouves.length > 0) dossiers = trouves;
+      } catch {
+        // on garde les emplacements par défaut
+      }
+    }
+    return [...new Set(dossiers)].filter((d) => existsSync(d));
+  })();
+  return dossiersPersonnels;
+}
+
+/** Où chercher une vidéo : dossiers sources des réglages, dossiers de l'utilisateur, copies. */
+async function emplacementsRecherche(): Promise<string[]> {
+  const { dossiers_sources } = await lireReglages();
+  return [...new Set([...dossiers_sources, ...(await dossiersUtilisateur()), dossierCopies()])];
+}
+
+/** Parcourt des dossiers (profondeur limitée) et renvoie les vidéos qui passent le filtre. */
 async function parcourir(
   dossiers: string[],
   filtre: (nom: string, taille: number) => boolean,
   signal?: AbortSignal,
-  profondeurMax = 6,
+  profondeurMax = 5,
+  filtreNom: (nom: string) => boolean = () => true,
 ): Promise<string[]> {
   const trouves: string[] = [];
   const pile = dossiers.map((d) => ({ chemin: d, profondeur: 0 }));
@@ -113,7 +153,7 @@ async function parcourir(
         if (profondeur < profondeurMax && !DOSSIERS_IGNORES.has(e.name.toLowerCase()) && !e.name.startsWith(".")) {
           pile.push({ chemin: complet, profondeur: profondeur + 1 });
         }
-      } else if (e.isFile() && EXTENSIONS_VIDEO.has(extname(e.name).toLowerCase())) {
+      } else if (e.isFile() && EXTENSIONS_VIDEO.has(extname(e.name).toLowerCase()) && filtreNom(e.name)) {
         try {
           if (filtre(e.name, (await stat(complet)).size)) trouves.push(complet);
         } catch {
@@ -127,8 +167,37 @@ async function parcourir(
 
 /** Glisser-déposer : le navigateur ne donne que le nom et la taille, on retrouve le chemin. */
 export async function chercherParNomEtTaille(nom: string, taille: number): Promise<string[]> {
-  const { dossiers_sources } = await lireReglages();
-  return parcourir(dossiers_sources, (n, t) => n === nom && t === taille);
+  const emplacements = await emplacementsRecherche();
+  const trouves = await parcourir(emplacements, (n, t) => n === nom && t === taille, undefined, 5, (n) => n === nom);
+  return [...new Set(trouves)];
+}
+
+/**
+ * Dernier recours du glisser-déposer : la vidéo est envoyée par le navigateur et copiée dans
+ * studio-workspace/_sources/. Une copie identique (même nom, même taille) est réutilisée.
+ */
+export async function televerser(nom: string, taille: number, flux: AsyncIterable<Buffer>): Promise<string> {
+  const propre = basename(nom).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_") || "video";
+  const dossier = dossierCopies();
+  await mkdir(dossier, { recursive: true });
+  const dest = join(dossier, propre);
+  const existant = await stat(dest).catch(() => null);
+  if (existant?.size === taille) return dest;
+  const temp = `${dest}.partiel`;
+  const sortie = createWriteStream(temp);
+  try {
+    for await (const morceau of flux) {
+      if (!sortie.write(morceau)) await new Promise((r) => sortie.once("drain", r));
+    }
+    await new Promise<void>((ok, ko) => sortie.end((e?: Error | null) => (e ? ko(e) : ok())));
+    if ((await stat(temp)).size !== taille) throw new Error("Copie incomplète.");
+    await rename(temp, dest);
+    return dest;
+  } catch (e) {
+    sortie.destroy();
+    await rm(temp, { force: true });
+    throw e;
+  }
 }
 
 /** Source déplacée ou renommée : mêmes taille et empreinte. */
@@ -137,9 +206,8 @@ export async function chercherParEmpreinte(
   taille: number,
   suivi: { signal?: AbortSignal; progression?: (v: number | null, detail?: string) => void },
 ): Promise<string | null> {
-  const { dossiers_sources } = await lireReglages();
   suivi.progression?.(null, "Recherche des fichiers de même taille");
-  const candidats = await parcourir(dossiers_sources, (_, t) => t === taille, suivi.signal);
+  const candidats = await parcourir(await emplacementsRecherche(), (_, t) => t === taille, suivi.signal);
   for (const [i, chemin] of candidats.entries()) {
     suivi.progression?.(i / candidats.length, `Vérification de ${parse(chemin).base}`);
     if ((await empreinteFichier(chemin, { signal: suivi.signal })) === empreinte) return chemin;

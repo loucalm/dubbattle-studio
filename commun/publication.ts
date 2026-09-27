@@ -13,6 +13,9 @@ import {
   type RepliquesJson,
 } from "./types.ts";
 
+/** Catégories proposées à l'étape 5 (on peut aussi en écrire une autre). */
+export const CATEGORIES = ["Film", "Série", "Animation", "Clip", "Musique", "Mème", "Pub", "Jeu vidéo", "Télé"];
+
 export function dureeExtrait(projet: Pick<Projet, "decoupe">): number {
   return projet.decoupe ? projet.decoupe.sortie_ms - projet.decoupe.entree_ms : 0;
 }
@@ -25,7 +28,7 @@ export function personnagesPublies(projet: Pick<Projet, "personnages" | "repliqu
 
 export function construireInfo(projet: Projet, version_medias: number): InfoJson {
   const { infos } = projet;
-  const info: InfoJson = {
+  return {
     id: projet.id,
     version_medias,
     titre: infos.titre.trim(),
@@ -36,12 +39,6 @@ export function construireInfo(projet: Projet, version_medias: number): InfoJson
     langue: infos.langue,
     fichiers: { ...FICHIERS_MEDIAS },
   };
-  // « source » est facultatif : on le place après le titre pour garder l'ordre de la fiche
-  if (infos.source.trim()) {
-    const { id, version_medias: v, titre, ...reste } = info;
-    return { id, version_medias: v, titre, source: infos.source.trim(), ...reste };
-  }
-  return info;
 }
 
 export function construireRepliques(projet: Projet): RepliquesJson {

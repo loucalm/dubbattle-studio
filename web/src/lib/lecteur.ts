@@ -91,6 +91,32 @@ export class Lecteur {
     if (p) p.gain.gain.setTargetAtTime(valeur, this.ctx.currentTime, 0.008);
   }
 
+  /**
+   * Joue un court extrait sans changer l'état du lecteur (son « image par image ») : les pistes
+   * gardent leur volume actuel, avec un petit fondu pour éviter les clics.
+   */
+  apercu(depuisMs: number, dureeMs: number): void {
+    if (this.enLecture) return;
+    void this.ctx.resume();
+    const t0 = this.ctx.currentTime + 0.005;
+    const d = dureeMs / 1000;
+    const fondu = Math.min(0.008, d / 4);
+    for (const p of this.pistes.values()) {
+      if (p.gain.gain.value < 0.001 || depuisMs / 1000 >= p.tampon.duration) continue;
+      const enveloppe = this.ctx.createGain();
+      enveloppe.gain.setValueAtTime(0, t0);
+      enveloppe.gain.linearRampToValueAtTime(1, t0 + fondu);
+      enveloppe.gain.setValueAtTime(1, t0 + d - fondu);
+      enveloppe.gain.linearRampToValueAtTime(0, t0 + d);
+      enveloppe.connect(p.gain);
+      const source = this.ctx.createBufferSource();
+      source.buffer = p.tampon;
+      source.connect(enveloppe);
+      source.onended = () => enveloppe.disconnect();
+      source.start(t0, Math.max(0, depuisMs) / 1000, d);
+    }
+  }
+
   /** N'entendre que cette piste. */
   solo(nom: string): void {
     for (const [n, p] of this.pistes) p.gain.gain.setTargetAtTime(n === nom ? 1 : 0, this.ctx.currentTime, 0.008);

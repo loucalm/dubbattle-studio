@@ -2,7 +2,7 @@
 // séparation, transcription, encodage, et reprise d'un extrait publié (fiche 7.6).
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.ts";
 import {
@@ -16,7 +16,7 @@ import {
   mesurerLoudness,
   sonderSource,
 } from "./ffmpeg.ts";
-import { chercherParEmpreinte, empreinteFichier, lireReglages } from "./fichiers.ts";
+import { chercherParEmpreinte, empreinteFichier } from "./fichiers.ts";
 import {
   chemins,
   enregistrerNouveauProjet,
@@ -35,7 +35,7 @@ import {
   recette,
   REGLAGES_ENCODAGE_DEFAUT,
 } from "../commun/encodage.ts";
-import { identifiantValide, versIdentifiant } from "../commun/identifiants.ts";
+import { identifiantDepuisFichier, identifiantLibre, identifiantValide, versIdentifiant } from "../commun/identifiants.ts";
 import { libelleModele } from "../commun/modeles.ts";
 import { decalerRepliques } from "../commun/repliques.ts";
 import { caleSurImage } from "../commun/temps.ts";
@@ -78,12 +78,25 @@ async function verifierSource(projet: Projet): Promise<void> {
 // Étape 1 : import
 // ---------------------------------------------------------------------------
 
-export async function creerProjet(chemin: string, id: string): Promise<Projet> {
-  if (!identifiantValide(id)) throw new ErreurHttp(400, "Identifiant invalide : minuscules, chiffres et tirets.");
-  if (projetExiste(id)) throw new ErreurHttp(409, `Un projet « ${id} » existe déjà.`);
-  if (existsSync(dossierExtraitPublie(id))) {
-    throw new ErreurHttp(409, `« ${id} » est déjà publié : ouvre-le depuis la bibliothèque pour le modifier.`);
+/** Identifiants déjà pris : projets de l'espace de travail et extraits publiés. */
+export async function identifiantsPris(sauf?: string): Promise<Set<string>> {
+  const pris = new Set<string>();
+  for (const dossier of [config.dossierEspace, join(config.dossierExtraits, "extraits")]) {
+    for (const nom of await readdir(dossier).catch(() => [] as string[])) if (nom !== sauf) pris.add(nom);
   }
+  return pris;
+}
+
+/** L'identifiant d'un extrait est son titre mis en forme (« La proue ! » → « la-proue »). */
+export async function identifiantPourTitre(titre: string, nomFichier: string, sauf?: string): Promise<string> {
+  const base = versIdentifiant(titre) || identifiantDepuisFichier(nomFichier);
+  return identifiantLibre(base, await identifiantsPris(sauf));
+}
+
+export async function creerProjet(chemin: string, titre: string): Promise<Projet> {
+  titre = titre.trim();
+  if (!titre) throw new ErreurHttp(400, "Donne un titre à l'extrait.");
+  const id = await identifiantPourTitre(titre, chemin.split(/[\\/]/).pop() ?? "");
   let taille: number;
   try {
     const s = await stat(chemin);
@@ -110,12 +123,13 @@ export async function creerProjet(chemin: string, id: string): Promise<Projet> {
     mix: null,
     gain_db: null,
     separations: [],
+    imports: [],
     voice: null,
     bed: null,
     personnages: [],
     repliques: [],
     prochain_id_replique: 1,
-    infos: { titre: "", source: "", categorie: "", tags: [], langue, vignette_ms: 0 },
+    infos: { titre, categorie: "", tags: [], langue, vignette_ms: 0 },
     encodage: { ...REGLAGES_ENCODAGE_DEFAUT },
     sortie: {},
     transcription: null,
@@ -166,7 +180,7 @@ export function lancerRechercheSource(id: string): Tache {
     const p = await lireProjet(id);
     if (!p.source.empreinte) throw new Error("Empreinte de la source inconnue.");
     const trouve = await chercherParEmpreinte(p.source.empreinte, p.source.taille_octets, ctx);
-    if (!trouve) throw new Error("Source introuvable dans les dossiers sources (voir Réglages).");
+    if (!trouve) throw new Error("Source introuvable (dossiers sources des Réglages, Téléchargements, Vidéos, Bureau, Documents).");
     await relierSource(id, trouve, ctx, false);
   });
 }
@@ -199,6 +213,12 @@ export async function relierSource(id: string, chemin: string, ctx?: ContexteTac
 // Modifications depuis l'interface (découpe, choix des pistes, répliques, infos…)
 // ---------------------------------------------------------------------------
 
+/** Fin de la piste vidéo (temps du Studio) : l'audio peut durer un peu plus, pas l'extrait. */
+export function finVideo(source: Projet["source"]): number {
+  const { duree_ms, decalage_ms } = source.video;
+  return duree_ms ? Math.min(source.duree_ms, decalage_ms + duree_ms) : source.duree_ms;
+}
+
 export function separationPerimee(p: Projet, sid: string): boolean {
   const s = p.separations.find((x) => x.id === sid);
   if (!s || !p.decoupe) return true;
@@ -216,12 +236,23 @@ export function mixAJour(p: Projet): boolean {
   );
 }
 
+export function importPerime(p: Projet, iid: string): boolean {
+  const i = p.imports.find((x) => x.id === iid);
+  return !i || !p.decoupe || i.decoupe.entree_ms !== p.decoupe.entree_ms || i.decoupe.sortie_ms !== p.decoupe.sortie_ms;
+}
+
 /** Nouvelle plage ou nouvelle piste audio : le mix, le gain et les pistes choisies ne valent plus. */
 function invaliderAudio(p: Projet): void {
   p.gain_db = null;
   for (const quoi of ["voice", "bed"] as const) {
     const choix = p[quoi];
-    if (choix?.origine === "publie" || (choix?.origine === "separation" && separationPerimee(p, choix.separation))) p[quoi] = null;
+    if (
+      choix?.origine === "publie" ||
+      (choix?.origine === "separation" && separationPerimee(p, choix.separation)) ||
+      (choix?.origine === "import" && importPerime(p, choix.import))
+    ) {
+      p[quoi] = null;
+    }
   }
 }
 
@@ -230,7 +261,9 @@ function verifierChoix(p: Projet, choix: ChoixPiste | null): void {
   if (choix.origine === "separation" && separationPerimee(p, choix.separation)) {
     throw new ErreurHttp(400, "Cette séparation n'existe pas ou ne correspond plus à la découpe.");
   }
-  if (choix.origine === "import") throw new ErreurHttp(400, "L'import de pistes n'est pas encore disponible.");
+  if (choix.origine === "import" && importPerime(p, choix.import)) {
+    throw new ErreurHttp(400, "Cette piste importée n'existe pas ou ne correspond plus à la découpe.");
+  }
 }
 
 export async function appliquerModification(id: string, m: ModificationProjet): Promise<Projet> {
@@ -245,9 +278,10 @@ export async function appliquerModification(id: string, m: ModificationProjet): 
 
     if (m.decoupe) {
       const { ips, decalage_ms } = p.source.video;
+      const fin = finVideo(p.source);
       const d: Decoupe = {
         entree_ms: caleSurImage(Math.max(0, m.decoupe.entree_ms), ips, decalage_ms),
-        sortie_ms: caleSurImage(Math.min(p.source.duree_ms, m.decoupe.sortie_ms), ips, decalage_ms),
+        sortie_ms: caleSurImage(Math.min(fin, m.decoupe.sortie_ms), ips, decalage_ms),
       };
       const duree = d.sortie_ms - d.entree_ms;
       if (duree < DUREE_MIN_EXTRAIT_MS) throw new ErreurHttp(400, "Extrait trop court (0,5 s minimum).");
@@ -305,7 +339,6 @@ export async function appliquerModification(id: string, m: ModificationProjet): 
       const duree = p.decoupe ? p.decoupe.sortie_ms - p.decoupe.entree_ms : Infinity;
       p.infos = {
         titre: m.infos.titre,
-        source: m.infos.source,
         categorie: m.infos.categorie,
         tags: m.infos.tags,
         langue: m.infos.langue,
@@ -330,7 +363,7 @@ export async function appliquerModification(id: string, m: ModificationProjet): 
 // ---------------------------------------------------------------------------
 
 /** Extrait l'audio original de la plage et mesure son volume, si ce n'est pas déjà fait. */
-async function preparerMix(id: string, ctx: ContexteTache): Promise<Projet> {
+export async function preparerMix(id: string, ctx: ContexteTache): Promise<Projet> {
   const p = await lireProjet(id);
   if (!p.decoupe) throw new Error("Fais d'abord la découpe (étape 2).");
   if (mixAJour(p)) return p;
@@ -343,18 +376,23 @@ async function preparerMix(id: string, ctx: ContexteTache): Promise<Projet> {
   ctx.progression(0.6, "Mesure du volume");
   const lufs = await mesurerLoudness(c.mix, { signal: ctx.signal });
   const perimees: string[] = [];
+  const importsPerimes: string[] = [];
   const projet = await modifierProjet(id, (q) => {
     q.mix = { decoupe, piste_audio: piste, loudness_lufs: lufs };
     q.gain_db = gainPourLoudness(lufs);
     // les séparations d'une autre plage ne servent plus
     for (const s of q.separations) if (separationPerimee(q, s.id)) perimees.push(s.id);
     q.separations = q.separations.filter((s) => !perimees.includes(s.id));
+    for (const i of q.imports) if (importPerime(q, i.id)) importsPerimes.push(i.id);
+    q.imports = q.imports.filter((i) => !importsPerimes.includes(i.id));
     for (const quoi of ["voice", "bed"] as const) {
       const choix = q[quoi];
       if (choix?.origine === "separation" && perimees.includes(choix.separation)) q[quoi] = null;
+      if (choix?.origine === "import" && importsPerimes.includes(choix.import)) q[quoi] = null;
     }
   });
   for (const sid of perimees) await rm(c.separation(sid), { recursive: true, force: true });
+  for (const iid of importsPerimes) await rm(c.importWav(iid), { force: true });
   return projet;
 }
 
@@ -416,7 +454,10 @@ export function wavPiste(p: Projet, quoi: "voice" | "bed"): string | null {
     const chemin = join(chemins(p.id).separation(choix.separation), `${quoi}.wav`);
     return existsSync(chemin) ? chemin : null;
   }
-  if (choix?.origine === "import") return existsSync(choix.fichier) ? choix.fichier : null;
+  if (choix?.origine === "import") {
+    const chemin = chemins(p.id).importWav(choix.import);
+    return existsSync(chemin) ? chemin : null;
+  }
   return null;
 }
 
@@ -522,6 +563,7 @@ export function sourcesLecture(p: Projet): SourcesLecture {
   for (const quoi of ["voice", "bed"] as const) {
     const choix = p[quoi];
     if (wavPiste(p, quoi) && choix?.origine === "separation") lecture[quoi] = `${base}/${quoi}${v(choix.separation)}`;
+    else if (wavPiste(p, quoi) && choix?.origine === "import") lecture[quoi] = `${base}/${quoi}${v(choix.import)}`;
     else if (p.sortie[quoi] && existsSync(p.sortie[quoi]!.fichier)) lecture[quoi] = `${base}/sortie-${quoi}${v(p.sortie[quoi]!.empreinte)}`;
   }
   return lecture;
@@ -570,6 +612,7 @@ export async function ouvrirExtraitPublie(id: string): Promise<Projet> {
     mix: null,
     gain_db: fab.gain_db,
     separations: [],
+    imports: [],
     voice: { origine: "publie", piste: fab.voice },
     bed: { origine: "publie", piste: fab.bed },
     personnages: info.personnages,
@@ -577,7 +620,6 @@ export async function ouvrirExtraitPublie(id: string): Promise<Projet> {
     prochain_id_replique: Math.max(0, ...repliques.repliques.map((r) => r.id)) + 1,
     infos: {
       titre: info.titre,
-      source: info.source ?? "",
       categorie: info.categorie,
       tags: info.tags,
       langue: info.langue,
@@ -602,6 +644,6 @@ export async function ouvrirExtraitPublie(id: string): Promise<Projet> {
     };
   }
   await enregistrerNouveauProjet(projet);
-  if ((await lireReglages()).dossiers_sources.length > 0) lancerRechercheSource(id);
+  lancerRechercheSource(id);
   return projet;
 }

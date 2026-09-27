@@ -13,6 +13,7 @@
   import type { ProjetOuvert } from "../lib/projet.svelte.ts";
   import { studio } from "../lib/studio.svelte.ts";
   import { identifiantLibre, versIdentifiant } from "../../../commun/identifiants.ts";
+  import { ipsCible } from "../../../commun/encodage.ts";
   import { dureeExtrait } from "../../../commun/publication.ts";
   import { problemesRepliques, trierRepliques } from "../../../commun/repliques.ts";
   import { formaterTemps } from "../../../commun/temps.ts";
@@ -109,6 +110,36 @@
     if (!url) return;
     void chargerTampon(url).then((t) => lecteur.ajouterPiste("original", t, entendre === "original" ? 1 : 0));
   });
+
+  // ---- préférences de l'éditeur, gardées dans le navigateur ----
+  function preference(cle: string, defaut: boolean): boolean {
+    try {
+      const v = localStorage.getItem(`studio.repliques.${cle}`);
+      return v === null ? defaut : v === "1";
+    } catch {
+      return defaut;
+    }
+  }
+  function memoriser(cle: string, valeur: boolean) {
+    try {
+      localStorage.setItem(`studio.repliques.${cle}`, valeur ? "1" : "0");
+    } catch {
+      // stockage indisponible : la préférence ne dure que la session
+    }
+  }
+  let apercuSurvol = $state(preference("survol", true));
+  let sonImage = $state(preference("son-image", true));
+
+  // ---- image par image ----
+  const dureeImageMs = $derived(1000 / ipsCible(p.source.video.ips));
+  function pas(images: number) {
+    lecteur.pause();
+    enLecture = false;
+    const cible = Math.max(0, Math.min(duree, (Math.round(position / dureeImageMs) + images) * dureeImageMs));
+    lecteur.aller(cible);
+    position = cible;
+    if (sonImage) lecteur.apercu(cible, Math.max(dureeImageMs, 60) * (Math.abs(images) > 1 ? 4 : 1));
+  }
 
   function basculerEcoute(quoi: "voice" | "original") {
     entendre = quoi;
@@ -243,6 +274,9 @@
     if (e.key === " ") {
       lecteur.basculer();
       enLecture = lecteur.enLecture;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const sens = e.key === "ArrowLeft" ? -1 : 1;
+      pas(e.shiftKey ? sens * Math.round(1000 / dureeImageMs) : sens);
     } else if (e.key === "Enter" && choisie) lireReplique(choisie);
     else if ((e.key === "Delete" || e.key === "Backspace") && choisie) supprimer(choisie.id);
     else if (e.key.toLowerCase() === "n") selectionner(nouvelleReplique(position, Math.min(duree, position + 1500)).id);
@@ -391,6 +425,19 @@
     <button class="petit" class:actif={entendre === "voice"} onclick={() => basculerEcoute("voice")} disabled={!d.lecture.voice}>Voice</button>
     <button class="petit" class:actif={entendre === "original"} onclick={() => basculerEcoute("original")} disabled={!d.lecture.mix}>Original</button>
     <span class="separateur"></span>
+    <button
+      class="petit"
+      class:actif={apercuSurvol}
+      title="Montre la réplique sous la souris"
+      onclick={() => memoriser("survol", (apercuSurvol = !apercuSurvol))}>Aperçu au survol</button
+    >
+    <button
+      class="petit"
+      class:actif={sonImage}
+      title="Fait entendre le son à chaque image avec ← et →"
+      onclick={() => memoriser("son-image", (sonImage = !sonImage))}>Son image par image</button
+    >
+    <span class="separateur"></span>
     <button class="petit" onclick={() => editeur?.zoomArriere()}>−</button>
     <button class="petit" onclick={() => editeur?.zoomAvant()}>+</button>
     <button class="petit" onclick={() => editeur?.toutVoir()}>Tout</button>
@@ -428,6 +475,7 @@
     {selection}
     {position}
     {enLecture}
+    survol={apercuSurvol}
     onselect={(id) => selectionner(id)}
     onchange={(id, debut, fin) => modifierReplique(id, { debut_ms: debut, fin_ms: fin })}
     onfin={() => changer(true)}
@@ -435,7 +483,8 @@
     onseek={(ms) => lecteur.aller(ms)}
   />
   <p class="discret petit">
-    <kbd>Espace</kbd> lecture · <kbd>Entrée</kbd> écouter la réplique · <kbd>↑</kbd> <kbd>↓</kbd> réplique précédente / suivante ·
+    <kbd>Espace</kbd> lecture · <kbd>←</kbd> <kbd>→</kbd> image par image (<kbd>Maj</kbd> : 1 s) · <kbd>Entrée</kbd> écouter la réplique ·
+    <kbd>↑</kbd> <kbd>↓</kbd> réplique précédente / suivante ·
     <kbd>1</kbd>…<kbd>9</kbd> personnage · <kbd>Suppr</kbd> supprimer · <kbd>Ctrl</kbd> + molette : zoom
   </p>
 

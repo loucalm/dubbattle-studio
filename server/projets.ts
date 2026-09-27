@@ -28,6 +28,9 @@ export function chemins(id: string) {
     separations: join(dossier, "separations"),
     separation: (sid: string) => join(dossier, "separations", sid),
     transcription: join(dossier, "transcription.json"),
+    imports: join(dossier, "imports"),
+    importWav: (iid: string) => join(dossier, "imports", `${iid}.wav`),
+    exports: join(dossier, "export"),
     sortie: join(dossier, "sortie"),
     sortieMedia: (media: Media) => join(dossier, "sortie", FICHIERS_MEDIAS[media]),
   };
@@ -65,6 +68,8 @@ export async function lireProjet(id: string): Promise<Projet> {
     throw new ErreurHttp(404, `Projet « ${id} » introuvable.`);
   }
   const projet = JSON.parse(texte) as Projet;
+  // projets créés par une version précédente du Studio
+  projet.imports ??= [];
   cache.set(id, projet);
   return structuredClone(projet);
 }
@@ -140,7 +145,16 @@ export function renommerProjet(id: string, nouvelId: string): Promise<void> {
     const projet = await lireProjet(id);
     if (projet.publication) throw new ErreurHttp(409, "Un extrait déjà publié garde son identifiant.");
     if (existsSync(chemins(nouvelId).dossier)) throw new ErreurHttp(409, `« ${nouvelId} » est déjà pris.`);
-    await rename(chemins(id).dossier, chemins(nouvelId).dossier);
+    for (let essai = 0; ; essai++) {
+      try {
+        await rename(chemins(id).dossier, chemins(nouvelId).dossier);
+        break;
+      } catch {
+        // Windows : un fichier du dossier encore ouvert (lecture vidéo) bloque le renommage un instant
+        if (essai >= 8) throw new ErreurHttp(409, "Le dossier du projet est occupé : réessaie dans un instant.");
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
     cache.delete(id);
     projet.id = nouvelId;
     // les médias encodés suivent le dossier

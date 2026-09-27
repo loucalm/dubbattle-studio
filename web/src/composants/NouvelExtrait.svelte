@@ -1,34 +1,53 @@
 <script lang="ts">
-  // Étape 1 : choisir une vidéo source (glisser-déposer, explorateur ou chemin collé) et créer le projet.
+  // Étape 1 : choisir une vidéo source (fenêtre « Ouvrir » de Windows, glisser-déposer ou chemin
+  // collé), lui donner un titre, et créer le projet. L'identifiant est tiré du titre.
   import Explorateur from "./Explorateur.svelte";
   import Modale from "./Modale.svelte";
   import { api } from "../lib/api.ts";
   import { tailleLisible } from "../lib/outils.ts";
   import { studio } from "../lib/studio.svelte.ts";
-  import { identifiantValide } from "../../../commun/identifiants.ts";
+  import { versIdentifiant } from "../../../commun/identifiants.ts";
 
   let explorateur = $state(false);
   let survol = $state(false);
   let cheminSaisi = $state("");
   let message = $state<{ texte: string; niveau: "erreur" | "info" } | null>(null);
   let candidats = $state<string[]>([]);
+  let introuvable = $state<File | null>(null);
+  let copie = $state<number | null>(null);
   let choisi = $state<string | null>(null);
-  let id = $state("");
+  let titre = $state("");
   let creation = $state(false);
 
   const nomFichier = (chemin: string) => chemin.split(/[\\/]/).pop() ?? chemin;
+  const identifiant = $derived(versIdentifiant(titre));
 
-  async function choisir(chemin: string) {
+  function choisir(chemin: string) {
     chemin = chemin.trim().replace(/^"|"$/g, "");
     if (!chemin) return;
     explorateur = false;
     candidats = [];
-    choisi = chemin;
+    introuvable = null;
     message = null;
+    choisi = chemin;
+    // titre proposé : le nom du fichier, sans extension ni séparateurs
+    titre = nomFichier(chemin)
+      .replace(/\.[^.]+$/, "")
+      .replace(/[._]+/g, " ")
+      .trim()
+      .slice(0, 100);
+  }
+
+  async function parcourir() {
+    if (!studio.serveur?.dialogues_natifs) {
+      explorateur = true;
+      return;
+    }
     try {
-      id = (await api.identifiant(nomFichier(chemin))).id;
-    } catch (e) {
-      message = { texte: (e as Error).message, niveau: "erreur" };
+      const { chemin } = await api.dialogue("video", "Choisir une vidéo source");
+      if (chemin) choisir(chemin);
+    } catch {
+      explorateur = true;
     }
   }
 
@@ -37,30 +56,43 @@
     survol = false;
     const fichier = e.dataTransfer?.files[0];
     if (!fichier) return;
-    // le navigateur ne donne pas le chemin : on le retrouve par le nom et la taille
-    message = { texte: `Recherche de « ${fichier.name} » dans les dossiers sources…`, niveau: "info" };
+    candidats = [];
+    introuvable = null;
+    // le navigateur ne donne jamais le chemin d'un fichier déposé : on le retrouve par nom et taille
+    message = { texte: `Recherche de « ${fichier.name} »…`, niveau: "info" };
     try {
       const { chemins } = await api.chercherFichier(fichier.name, fichier.size);
-      if (chemins.length === 1) await choisir(chemins[0]);
+      if (chemins.length === 1) choisir(chemins[0]);
       else if (chemins.length > 1) {
         candidats = chemins;
         message = { texte: "Plusieurs fichiers correspondent : lequel ?", niveau: "info" };
       } else {
-        message = {
-          texte: `« ${fichier.name} » (${tailleLisible(fichier.size)}) est introuvable dans les dossiers sources. Ajoute son dossier dans les Réglages, ou utilise « Parcourir ».`,
-          niveau: "erreur",
-        };
+        introuvable = fichier;
+        message = null;
       }
     } catch (err) {
       message = { texte: (err as Error).message, niveau: "erreur" };
     }
   }
 
+  async function copier() {
+    if (!introuvable) return;
+    copie = 0;
+    try {
+      const { chemin } = await api.televerser(introuvable, (v) => (copie = v));
+      choisir(chemin);
+    } catch (e) {
+      message = { texte: (e as Error).message, niveau: "erreur" };
+    } finally {
+      copie = null;
+    }
+  }
+
   async function creer() {
-    if (!choisi) return;
+    if (!choisi || !titre.trim()) return;
     creation = true;
     try {
-      const projet = await api.creerProjet(choisi, id);
+      const projet = await api.creerProjet(choisi, titre.trim());
       choisi = null;
       studio.aller({ ecran: "projet", id: projet.id, etape: "import" });
     } catch (e) {
@@ -85,13 +117,13 @@
   <div class="grand">Glisse une vidéo ici</div>
   <div class="discret petit">mp4, mkv, mov, webm… La source reste à sa place : rien n'est copié.</div>
   <div class="ligne centre">
-    <button onclick={() => (explorateur = true)}>Parcourir…</button>
+    <button class="principal" onclick={parcourir}>Parcourir…</button>
     <span class="discret petit">ou</span>
     <form
       class="ligne"
       onsubmit={(e) => {
         e.preventDefault();
-        void choisir(cheminSaisi);
+        choisir(cheminSaisi);
       }}
     >
       <input class="mono chemin" bind:value={cheminSaisi} placeholder="Coller le chemin du fichier" spellcheck="false" />
@@ -102,6 +134,20 @@
   {#each candidats as c (c)}
     <button class="discret petit" onclick={() => choisir(c)}>{c}</button>
   {/each}
+  {#if introuvable}
+    <div class="message attention pile introuvable">
+      <span>
+        « {introuvable.name} » n'est ni dans tes dossiers Téléchargements, Vidéos, Bureau et Documents, ni dans les
+        dossiers sources des Réglages. Le navigateur ne donne pas l'emplacement d'un fichier glissé.
+      </span>
+      <div class="ligne">
+        <button onclick={parcourir}>Le retrouver avec Parcourir…</button>
+        <button onclick={copier} disabled={copie !== null}>
+          {copie !== null ? `Copie… ${Math.round(copie * 100)} %` : `Copier la vidéo dans le Studio (${tailleLisible(introuvable.size)})`}
+        </button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 {#if explorateur}
@@ -116,19 +162,19 @@
         <code class="source">{choisi}</code>
       </div>
       <label class="champ">
-        Identifiant de l'extrait
-        <input class="mono" bind:value={id} spellcheck="false" />
+        Titre de l'extrait
+        <!-- svelte-ignore a11y_autofocus -->
+        <input bind:value={titre} maxlength="100" autofocus onkeydown={(e) => e.key === "Enter" && creer()} />
       </label>
       <p class="discret petit">
-        Minuscules, chiffres et tirets, par exemple <code>titanic-proue</code>. Il sert de nom de dossier et d'adresse :
-        il ne pourra plus changer une fois l'extrait publié.
+        Identifiant : <code>{identifiant || "…"}</code>. Tiré du titre, il sert de nom de dossier et d'adresse. Il suit
+        le titre jusqu'à la première publication, puis ne change plus.
       </p>
-      {#if id && !identifiantValide(id)}<p class="erreur petit">Identifiant invalide.</p>{/if}
       {#if message?.niveau === "erreur"}<p class="message erreur">{message.texte}</p>{/if}
     </div>
     {#snippet pied()}
       <button onclick={() => (choisi = null)}>Annuler</button>
-      <button class="principal" disabled={!identifiantValide(id) || creation} onclick={creer}>
+      <button class="principal" disabled={!identifiant || creation} onclick={creer}>
         {creation ? "Analyse de la vidéo…" : "Créer le projet"}
       </button>
     {/snippet}
@@ -167,5 +213,9 @@
   }
   .source {
     word-break: break-all;
+  }
+  .introuvable {
+    max-width: 640px;
+    text-align: left;
   }
 </style>

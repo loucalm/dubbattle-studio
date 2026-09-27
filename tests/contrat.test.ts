@@ -22,7 +22,7 @@ describe("fichiers publiés", async () => {
     expect(valider("info", info)).toEqual([]);
     expect(info.personnages.map((p) => p.id)).toEqual(["jack", "rose"]);
     expect(info.duree_ms).toBe(42_000);
-    expect(Object.keys(info).slice(0, 4)).toEqual(["id", "version_medias", "titre", "source"]);
+    expect(Object.keys(info).slice(0, 4)).toEqual(["id", "version_medias", "titre", "categorie"]);
   });
 
   it("repliques.json respecte le schéma, trié dans l'ordre du film", () => {

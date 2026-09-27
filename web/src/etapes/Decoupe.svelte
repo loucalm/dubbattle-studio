@@ -107,6 +107,14 @@
     sortie = entree !== null && s <= entree ? null : s;
   }
 
+  /** Toute la vidéo : de la première à la dernière image (l'audio peut durer un peu plus). */
+  function toutSelectionner() {
+    const finVideo = p.source.video.duree_ms ? Math.min(dureeSource, decalage + p.source.video.duree_ms) : dureeSource;
+    entree = debutImage(0);
+    sortie = debutImage(Math.floor(((finVideo - decalage) * ips) / 1000 + 1e-6));
+    timeline?.toutVoir();
+  }
+
   const duree = $derived(entree !== null && sortie !== null ? sortie - entree : null);
   const modifie = $derived(
     entree !== null &&
@@ -209,6 +217,7 @@
       <span class="separateur"></span>
       <button onclick={() => marquerEntree()} title="Touche I">Entrée ici <kbd>I</kbd></button>
       <button onclick={() => marquerSortie()} title="Touche O">Sortie ici <kbd>O</kbd></button>
+      <button onclick={toutSelectionner} title="Toute la vidéo, de la première à la dernière image">Tout sélectionner</button>
       <button onclick={lireSelection} disabled={entree === null || sortie === null} title="Touche L">Lire la sélection <kbd>L</kbd></button>
       <span class="espaceur"></span>
       <button class="discret petit" onclick={() => timeline?.voirSelection()} disabled={entree === null || sortie === null}>Zoom sélection</button>

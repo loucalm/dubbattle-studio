@@ -2,6 +2,7 @@
 
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import { pipeline } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname } from "node:path";
 import { ErreurHttp } from "./projets.ts";
@@ -124,6 +125,15 @@ const TYPES: Record<string, string> = {
   ".bin": "application/octet-stream",
 };
 
+/**
+ * Envoie le fichier et le referme dans tous les cas. Avec un simple .pipe(), une requête abandonnée
+ * par le navigateur (saut dans une vidéo, rechargement) laisse le fichier ouvert : sous Windows, il
+ * ne peut alors plus être remplacé, renommé ni supprimé.
+ */
+function diffuser(res: ServerResponse, chemin: string, options?: { start: number; end: number }): void {
+  pipeline(createReadStream(chemin, options), res, () => undefined);
+}
+
 /** Envoie un fichier, en gérant les requêtes partielles (déplacement dans une vidéo). */
 export async function envoyerFichier(
   req: IncomingMessage,
@@ -158,10 +168,10 @@ export async function envoyerFichier(
     }
     res.writeHead(206, { ...entetes, "content-range": `bytes ${debut}-${fin}/${taille}`, "content-length": fin - debut + 1 });
     if (req.method === "HEAD") return void res.end();
-    createReadStream(chemin, { start: debut, end: fin }).pipe(res);
+    diffuser(res, chemin, { start: debut, end: fin });
     return;
   }
   res.writeHead(200, { ...entetes, "content-length": taille });
   if (req.method === "HEAD") return void res.end();
-  createReadStream(chemin).pipe(res);
+  diffuser(res, chemin);
 }

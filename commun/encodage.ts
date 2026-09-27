@@ -55,12 +55,15 @@ export function debitEnBits(debit: string): number {
 }
 
 /** Description stable d'une piste choisie, telle qu'elle apparaît dans fabrication.json. */
-export function pisteFabrication(choix: ChoixPiste, projet: Pick<Projet, "separations">): PisteFabrication | null {
+export function pisteFabrication(choix: ChoixPiste, projet: Pick<Projet, "separations" | "imports">): PisteFabrication | null {
   if (choix.origine === "separation") {
     const s = projet.separations.find((x) => x.id === choix.separation);
     return s ? { origine: "separation", moteur: s.moteur, modele: s.modele } : null;
   }
-  if (choix.origine === "import") return { origine: "import", fichier: choix.fichier, empreinte: choix.empreinte };
+  if (choix.origine === "import") {
+    const i = projet.imports.find((x) => x.id === choix.import);
+    return i ? { origine: "import", fichier: i.nom, empreinte: i.empreinte } : null;
+  }
   return choix.piste;
 }
 
@@ -68,6 +71,10 @@ export function pisteFabrication(choix: ChoixPiste, projet: Pick<Projet, "separa
 function identitePiste(choix: ChoixPiste | null, projet: Projet): unknown {
   if (!choix) return null;
   if (choix.origine === "separation") return { ...pisteFabrication(choix, projet), separation: choix.separation };
+  if (choix.origine === "import") {
+    const i = projet.imports.find((x) => x.id === choix.import);
+    return { ...pisteFabrication(choix, projet), import: choix.import, decalage_ms: i?.decalage_ms ?? 0 };
+  }
   return pisteFabrication(choix, projet);
 }
 
@@ -75,7 +82,7 @@ function identitePiste(choix: ChoixPiste | null, projet: Projet): unknown {
  * Version de la façon d'encoder chaque média : l'augmenter quand une commande ffmpeg change,
  * pour que les fichiers déjà encodés soient signalés « à refaire ».
  */
-const VERSIONS_RECETTE: Record<Media, number> = { video: 2, voice: 1, bed: 1, vignette: 1 };
+const VERSIONS_RECETTE: Record<Media, number> = { video: 3, voice: 2, bed: 2, vignette: 2 };
 
 export function recette(media: Media, projet: Projet): string | null {
   const texte = recetteBrute(media, projet);
@@ -125,4 +132,27 @@ export function etatMedia(media: Media, projet: Projet): EtatMedia {
     if (JSON.stringify(attendus) !== JSON.stringify(sortie.images_cles ?? [])) return { etat: "images_cles" };
   }
   return { etat: "a_jour" };
+}
+
+/**
+ * Estimation de la taille des fichiers avant d'encoder (octets). La vidéo dépend du contenu :
+ * on part d'environ 0,06 bit par pixel et par image en CRF 26 (x264 « slow », image de film),
+ * divisé par deux tous les +6 de CRF, sans dépasser le débit maximal.
+ */
+export function estimerTailles(
+  dureeMs: number,
+  reglages: ReglagesEncodage,
+  video: { largeur: number; hauteur: number; ips: number },
+): { video_probable: number; video_max: number; audio: number } {
+  const hauteur = Math.min(reglages.hauteur, video.hauteur || reglages.hauteur);
+  const largeur = video.largeur && video.hauteur ? (hauteur * video.largeur) / video.hauteur : (hauteur * 16) / 9;
+  const secondes = dureeMs / 1000;
+  const plafond = debitEnBits(reglages.debit_max);
+  const typique = largeur * hauteur * ipsCible(video.ips) * 0.06 * 2 ** ((26 - reglages.crf) / 6);
+  const octets = (bits: number) => Math.round((bits * secondes) / 8);
+  return {
+    video_probable: octets(Math.min(plafond, typique)),
+    video_max: octets(plafond),
+    audio: octets(48_000 + 96_000),
+  };
 }

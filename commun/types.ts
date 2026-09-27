@@ -44,10 +44,16 @@ export interface InfosSource {
   debut_ms: number;
   conteneur: string;
   video: {
+    /** index ffprobe de la piste vidéo (une pochette peut aussi compter comme piste vidéo) */
+    index?: number;
     codec: string;
     largeur: number;
     hauteur: number;
     ips: number;
+    /** cadence exacte selon ffprobe (« 30000/1001 »), pour le filtre fps */
+    cadence?: string;
+    /** durée de la piste vidéo seule, si connue : l'audio dure souvent un peu plus longtemps */
+    duree_ms?: number | null;
     /** instant (temps du Studio) de la première image : la grille des images part de là */
     decalage_ms: number;
     format_pixels: string;
@@ -92,9 +98,37 @@ export interface Separation {
 
 export type ChoixPiste =
   | { origine: "separation"; separation: string }
-  | { origine: "import"; fichier: string; empreinte: string }
+  | { origine: "import"; import: string }
   /** piste déjà publiée, reprise d'un fabrication.json sans les WAV de travail (fiche 7.6) */
   | { origine: "publie"; piste: PisteFabrication };
+
+/** Piste retouchée dans un autre logiciel puis réimportée (fiche 7.5). */
+export interface ImportPiste {
+  /** identifiant local, aussi nom du fichier imports/<id>.wav (mis aux normes) */
+  id: string;
+  quoi: "voice" | "bed";
+  /** nom du fichier importé, noté dans fabrication.json */
+  nom: string;
+  /** empreinte du fichier importé tel quel */
+  empreinte: string;
+  /** plage au moment de l'import : si elle change, l'import est périmé */
+  decoupe: Decoupe;
+  /** recalage appliqué (ms) : > 0 = début coupé, < 0 = silence ajouté au début */
+  decalage_ms: number;
+  cree_le: string;
+}
+
+/** Ce que le Studio a mesuré sur un fichier importé, avant de le mettre aux normes. */
+export interface AnalyseImport {
+  import: string;
+  quoi: "voice" | "bed";
+  nom: string;
+  duree_ms: number;
+  attendu_ms: number;
+  /** décalage détecté par comparaison avec le mélange original, null si pas de comparaison possible */
+  decalage_ms: number | null;
+  confiance: number | null;
+}
 
 export interface Personnage {
   id: string;
@@ -112,7 +146,6 @@ export interface Replique {
 
 export interface Infos {
   titre: string;
-  source: string;
   categorie: string;
   tags: string[];
   langue: string;
@@ -165,6 +198,7 @@ export interface Projet {
   /** gain appliqué pareil à la voice et au bed pour viser -16 LUFS, mesuré sur le mix */
   gain_db: number | null;
   separations: Separation[];
+  imports: ImportPiste[];
   voice: ChoixPiste | null;
   bed: ChoixPiste | null;
   personnages: Personnage[];
@@ -203,7 +237,6 @@ export interface InfoJson {
   id: string;
   version_medias: number;
   titre: string;
-  source?: string;
   categorie: string;
   tags: string[];
   duree_ms: number;
@@ -371,6 +404,10 @@ export interface EtatServeur {
   dossiers: { extraits: string; espace: string; modeles: string };
   url_extraits: string;
   extraits_present: boolean;
+  /** fenêtres « Ouvrir » natives disponibles (Windows) */
+  dialogues_natifs: boolean;
+  /** dossiers de l'utilisateur fouillés pour retrouver une vidéo glissée */
+  dossiers_utilisateur: string[];
   modeles_separation: ModeleSeparation[];
   taches: Tache[];
 }

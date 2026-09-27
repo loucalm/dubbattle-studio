@@ -15,6 +15,19 @@
     dossiers = (await api.reglages()).dossiers_sources;
   });
 
+  async function ajouter() {
+    if (!studio.serveur?.dialogues_natifs) {
+      choix = true;
+      return;
+    }
+    try {
+      const { chemin } = await api.dialogue("dossier", "Ajouter un dossier de vidéos sources");
+      if (chemin) await enregistrer([...dossiers, chemin]);
+    } catch {
+      choix = true;
+    }
+  }
+
   async function enregistrer(liste: string[]) {
     try {
       dossiers = (await api.ecrireReglages({ dossiers_sources: liste })).dossiers_sources;
@@ -32,7 +45,8 @@
     <h3>Dossiers des vidéos sources</h3>
     <p class="discret petit">
       Les vidéos sources restent où elles sont (disque externe…). Le Studio cherche dans ces dossiers pour retrouver un
-      fichier glissé dans la fenêtre, ou une source déplacée ou renommée (grâce à son empreinte).
+      fichier glissé dans la fenêtre, ou une source déplacée ou renommée (grâce à son empreinte). Il cherche toujours
+      aussi dans : {studio.serveur?.dossiers_utilisateur.map((d) => d.split(/[\\/]/).pop()).join(", ") || "tes dossiers personnels"}.
     </p>
     {#each dossiers as d (d)}
       <div class="ligne">
@@ -42,7 +56,7 @@
     {:else}
       <p class="discret petit">Aucun dossier pour l'instant.</p>
     {/each}
-    <div><button onclick={() => (choix = true)}>Ajouter un dossier…</button></div>
+    <div><button onclick={ajouter}>Ajouter un dossier…</button></div>
     {#if erreur}<p class="message erreur">{erreur}</p>{/if}
   </section>
 

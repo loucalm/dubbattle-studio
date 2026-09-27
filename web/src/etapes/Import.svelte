@@ -7,7 +7,6 @@
   import { tailleLisible } from "../lib/outils.ts";
   import type { ProjetOuvert } from "../lib/projet.svelte.ts";
   import { studio } from "../lib/studio.svelte.ts";
-  import { identifiantValide } from "../../../commun/identifiants.ts";
   import { formaterDuree } from "../../../commun/temps.ts";
 
   let { ouvert }: { ouvert: ProjetOuvert } = $props();
@@ -16,8 +15,6 @@
   const p = $derived(d.projet);
   const s = $derived(p.source);
   let relier = $state(false);
-  // svelte-ignore state_referenced_locally
-  let nouvelId = $state(ouvert.id);
   let confirmationSuppression = $state(false);
 
   const tachesSource = $derived(
@@ -26,9 +23,17 @@
       .filter((t) => t !== undefined),
   );
 
-  async function renommer() {
-    const r = await ouvert.action(() => api.renommer(p.id, nouvelId), "Projet renommé.");
-    if (r) studio.aller({ ecran: "projet", id: r.id, etape: "import" });
+  async function choisirSource() {
+    if (!studio.serveur?.dialogues_natifs) {
+      relier = true;
+      return;
+    }
+    try {
+      const { chemin } = await api.dialogue("video", "Retrouver la vidéo source");
+      if (chemin) await ouvert.action(() => api.relierSource(p.id, chemin), "Source reliée.");
+    } catch {
+      relier = true;
+    }
   }
 
   async function supprimer() {
@@ -58,7 +63,7 @@
         </span>
         <div class="ligne">
           <button onclick={() => ouvert.action(() => api.relierSource(p.id))} disabled={!s.empreinte}>Chercher dans les dossiers sources</button>
-          <button onclick={() => (relier = true)}>Choisir le fichier…</button>
+          <button onclick={choisirSource}>Choisir le fichier…</button>
         </div>
       </div>
     {/if}
@@ -120,14 +125,14 @@
     {/if}
 
     <h2 class="espace-haut">Identifiant</h2>
+    <p><code>{p.id}</code></p>
     {#if p.publication}
-      <p class="discret petit">Déjà publié : l'identifiant <code>{p.id}</code> ne change plus.</p>
+      <p class="discret petit">Déjà publié : l'identifiant ne change plus.</p>
     {:else}
-      <div class="ligne">
-        <input class="mono" bind:value={nouvelId} spellcheck="false" />
-        <button disabled={nouvelId === p.id || !identifiantValide(nouvelId)} onclick={renommer}>Renommer</button>
-      </div>
-      <p class="discret petit">Minuscules, chiffres et tirets. Il devient le nom du dossier publié.</p>
+      <p class="discret petit">
+        Tiré du titre (étape 5) : il le suit jusqu'à la première publication, puis ne change plus. C'est le nom du dossier
+        publié et l'adresse de l'extrait.
+      </p>
     {/if}
 
     <h2 class="espace-haut">Projet</h2>

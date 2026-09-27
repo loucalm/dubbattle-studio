@@ -14,6 +14,9 @@ export interface Suivi {
 
 const secondes = (ms: number) => (ms / 1000).toFixed(3);
 
+/** Sélecteur de la piste vidéo pour -map (la première piste vidéo peut être une pochette). */
+const pisteVideo = (source: InfosSource) => (source.video.index !== undefined ? `0:${source.video.index}` : "0:v:0");
+
 // ---------------------------------------------------------------------------
 // Lecture des fichiers
 // ---------------------------------------------------------------------------
@@ -32,7 +35,7 @@ interface FluxProbe {
   channels?: number;
   duration?: string;
   disposition?: { attached_pic?: number };
-  tags?: { language?: string; title?: string };
+  tags?: { language?: string; title?: string; DURATION?: string };
 }
 
 interface Probe {
@@ -59,6 +62,13 @@ function fraction(texte: string | undefined): number {
   return d ? n / d : n;
 }
 
+/** Durée d'une piste : champ duration (MP4) ou étiquette DURATION « 00:03:00.021000000 » (MKV). */
+function dureeFlux(flux: FluxProbe): number | null {
+  if (flux.duration && Number.isFinite(Number(flux.duration))) return Number(flux.duration) * 1000;
+  const m = /^(\d+):(\d+):(\d+(?:\.\d+)?)$/.exec(flux.tags?.DURATION ?? "");
+  return m ? (Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000 : null;
+}
+
 /** Durée, résolution, i/s et pistes audio d'une vidéo source (étape 1). */
 export async function sonderSource(
   chemin: string,
@@ -76,7 +86,9 @@ export async function sonderSource(
     titre: s.tags?.title ?? null,
   }));
   // avg_frame_rate est plus fiable que r_frame_rate pour les fichiers à cadence variable
-  const ips = fraction(video.avg_frame_rate) || fraction(video.r_frame_rate);
+  const cadence = fraction(video.avg_frame_rate) ? video.avg_frame_rate! : video.r_frame_rate;
+  const ips = fraction(cadence);
+  const dureeVideo = dureeFlux(video);
   const debut = Number(p.format.start_time ?? 0) || 0;
   const debutVideo = Number(video.start_time ?? debut) || 0;
   return {
@@ -84,10 +96,13 @@ export async function sonderSource(
     debut_ms: Math.round(debut * 1_000_000) / 1000,
     conteneur: p.format.format_name,
     video: {
+      index: video.index,
       codec: video.codec_name ?? "?",
       largeur: video.width ?? 0,
       hauteur: video.height ?? 0,
       ips: Math.round(ips * 1000) / 1000,
+      cadence,
+      duree_ms: dureeVideo === null ? null : Math.round(dureeVideo),
       decalage_ms: Math.round((debutVideo - debut) * 1_000_000) / 1000,
       format_pixels: video.pix_fmt ?? "?",
       entrelacee: ["tt", "bb", "tb", "bt"].includes(video.field_order ?? ""),
@@ -221,7 +236,7 @@ export async function genererApercu(source: InfosSource, rang: number, dest: str
         "-i",
         source.chemin,
         "-map",
-        "0:v:0",
+        pisteVideo(source),
         ...audio,
         "-sn",
         "-dn",
@@ -299,6 +314,8 @@ export async function capturerImage(source: InfosSource, instantMs: number, larg
       secondes(instantMs),
       "-i",
       source.chemin,
+      "-map",
+      pisteVideo(source),
       "-frames:v",
       "1",
       "-vf",
@@ -335,6 +352,8 @@ export async function extraireMix(source: InfosSource, rang: number, decoupe: De
         "-map",
         `0:a:${rang}`,
         "-vn",
+        "-af",
+        "apad",
         "-ac",
         "2",
         "-ar",
@@ -375,9 +394,16 @@ export async function encoderVideo(
 ): Promise<void> {
   const duree = decoupe.sortie_ms - decoupe.entree_ms;
   const debit = debitEnBits(reglages.debit_max);
-  const filtres = [filtreImage(source, { hauteurMax: reglages.hauteur })];
   const ips = ipsCible(source.video.ips);
-  if (ips < source.video.ips - 0.01) filtres.push(`fps=${ips}`);
+  const divisee = ips < source.video.ips - 0.01;
+  const filtres = [
+    filtreImage(source, { hauteurMax: reglages.hauteur }),
+    // cadence constante (les vidéos de téléphone sont souvent à cadence variable)
+    `fps=${divisee || !source.video.cadence ? ips : source.video.cadence}`,
+    // si la piste vidéo s'arrête avant la sortie (l'audio dure souvent un peu plus), on prolonge
+    // la dernière image plutôt que de livrer une vidéo plus courte que la voice et le bed
+    "tpad=stop_mode=clone:stop_duration=2",
+  ];
   // un nombre d'images exact plutôt que « -t » : ffmpeg compare -t à des horodatages déjà
   // arrondis à la grille des images, ce qui peut ajouter une image en trop à la fin
   const images = Math.max(1, Math.round((duree * ips) / 1000));
@@ -391,7 +417,7 @@ export async function encoderVideo(
         "-frames:v",
         String(images),
         "-map",
-        "0:v:0",
+        pisteVideo(source),
         "-an",
         "-sn",
         "-dn",
@@ -446,6 +472,7 @@ export async function encoderPisteAudio(
     `volume=${gainDb}dB`,
     "alimiter=limit=0.89:level=0:latency=1",
     "aresample=48000",
+    "apad",
   ];
   await versFichier(dest, (temp) =>
     ffmpegSuivi(
@@ -480,6 +507,8 @@ export async function encoderVignette(source: InfosSource, instantMs: number, de
         secondes(instantMs),
         "-i",
         source.chemin,
+        "-map",
+        pisteVideo(source),
         "-frames:v",
         "1",
         "-vf",
@@ -500,4 +529,63 @@ export async function encoderVignette(source: InfosSource, instantMs: number, de
 export async function descriptionFichier(chemin: string): Promise<string> {
   const { size } = await stat(chemin);
   return `${basename(chemin)} (${(size / 1048576).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Mo)`;
+}
+
+// ---------------------------------------------------------------------------
+// Retouche dans un autre logiciel (fiche 7.5)
+// ---------------------------------------------------------------------------
+
+/** Décode un fichier audio en mono flottant (pour comparer deux pistes). */
+export async function decoderMono(chemin: string, frequence: number, dureeMaxMs?: number): Promise<Float32Array> {
+  const morceaux: Buffer[] = [];
+  await executer(
+    config.ffmpeg,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      chemin,
+      ...(dureeMaxMs ? ["-t", secondes(dureeMaxMs)] : []),
+      "-ac",
+      "1",
+      "-ar",
+      String(frequence),
+      "-f",
+      "f32le",
+      "pipe:1",
+    ],
+    { surDonnees: (m) => morceaux.push(m) },
+  );
+  const tout = Buffer.concat(morceaux);
+  const sortie = new Float32Array(Math.floor(tout.length / 4));
+  for (let i = 0; i < sortie.length; i++) sortie[i] = tout.readFloatLE(i * 4);
+  return sortie;
+}
+
+/** Durée d'un fichier audio (ms). */
+export async function dureeAudio(chemin: string): Promise<number> {
+  const d = await dureesFichier(chemin);
+  return d.flux.find((f) => f.type === "audio")?.duree_ms ?? d.fichier;
+}
+
+/**
+ * Remet une piste importée aux normes : WAV flottant 48 kHz stéréo, recalée, à la durée exacte
+ * de l'extrait (complétée par du silence ou coupée à la fin).
+ */
+export async function normaliserImport(brut: string, dest: string, dureeMs: number, decalageMs: number): Promise<void> {
+  const filtres = ["aformat=channel_layouts=stereo"];
+  if (decalageMs > 0) filtres.push(`atrim=start=${secondes(decalageMs)}`, "asetpts=PTS-STARTPTS");
+  if (decalageMs < 0) filtres.push(`adelay=${Math.round(-decalageMs)}:all=1`);
+  filtres.push("aresample=48000", "apad");
+  await versFichier(dest, (temp) =>
+    ffmpegSuivi(["-i", brut, "-vn", "-af", filtres.join(","), "-t", secondes(dureeMs), "-c:a", "pcm_f32le", temp], dureeMs, {}),
+  );
+}
+
+/** Copie à retoucher : WAV 48 kHz 24 bits, à la durée exacte de l'extrait. */
+export async function exporterWav(source: string, dest: string, dureeMs: number): Promise<void> {
+  await versFichier(dest, (temp) =>
+    ffmpegSuivi(["-i", source, "-af", "aresample=48000,apad", "-t", secondes(dureeMs), "-c:a", "pcm_s24le", temp], dureeMs, {}),
+  );
 }

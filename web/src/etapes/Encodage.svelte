@@ -6,7 +6,8 @@
   import { dateLisible, tailleLisible } from "../lib/outils.ts";
   import type { ProjetOuvert } from "../lib/projet.svelte.ts";
   import { studio } from "../lib/studio.svelte.ts";
-  import { ipsCible, REGLAGES_ENCODAGE_DEFAUT, TAILLE_MAX_FICHIER } from "../../../commun/encodage.ts";
+  import { estimerTailles, ipsCible, REGLAGES_ENCODAGE_DEFAUT, TAILLE_MAX_FICHIER } from "../../../commun/encodage.ts";
+  import { dureeExtrait } from "../../../commun/publication.ts";
   import { FICHIERS_MEDIAS, MEDIAS, type Media, type ReglagesEncodage } from "../../../commun/types.ts";
 
   let { ouvert }: { ouvert: ProjetOuvert } = $props();
@@ -32,6 +33,10 @@
   const bloque = $derived(MEDIAS.some((m) => etats[m].etat === "bloque"));
   const modifies = $derived(
     reglages.hauteur !== p.encodage.hauteur || reglages.crf !== p.encodage.crf || reglages.debit_max !== p.encodage.debit_max,
+  );
+
+  const estimation = $derived(
+    estimerTailles(dureeExtrait(p), { ...reglages, crf: Number(reglages.crf) || 26 }, p.source.video),
   );
 
   function libelleEtat(m: Media): { texte: string; classe: string } {
@@ -112,20 +117,45 @@
         <option value={480}>480p (sources de faible qualité)</option>
       </select>
     </label>
-    <div class="ligne deux">
-      <label class="champ">
-        CRF (qualité constante)
-        <input type="number" min="16" max="36" bind:value={reglages.crf} />
-      </label>
-      <label class="champ">
-        Débit maximal
-        <input bind:value={reglages.debit_max} class="mono" />
-      </label>
+    <label class="champ">
+      CRF (qualité constante)
+      <input type="number" min="16" max="36" bind:value={reglages.crf} />
+    </label>
+    <p class="discret petit explication">
+      Plus le nombre est bas, plus l'image est belle et le fichier lourd. 18 : aucune perte visible · 23 : très bon ·
+      <strong>26 : bon compromis (fiche)</strong> · 30 : perte visible sur les détails. Chaque +6 divise à peu près la
+      taille par deux.
+    </p>
+    <label class="champ">
+      Débit maximal
+      <input bind:value={reglages.debit_max} class="mono" />
+    </label>
+    <p class="discret petit explication">
+      Plafond du débit vidéo, en bits par seconde (2M = 2 Mbit/s). Sur les scènes très agitées (explosions, confettis,
+      grain), l'encodeur ne le dépasse pas : la qualité y baisse un peu, mais la taille reste garantie (2M ≈ 15 Mo par
+      minute au pire).
+    </p>
+    <div class="estimation">
+      <div class="ligne">
+        <span class="discret">Taille estimée</span>
+        <span class="espaceur"></span>
+        <strong>≈ {tailleLisible(estimation.video_probable + estimation.audio)}</strong>
+      </div>
+      <div class="discret petit">
+        vidéo ≈ {tailleLisible(estimation.video_probable)} (au plus {tailleLisible(estimation.video_max)}) · voice et bed
+        {tailleLisible(estimation.audio)}
+      </div>
+      <div class="discret petit">
+        Estimation : la taille réelle dépend de l'image (beaucoup de mouvement = plus lourd). Limite Cloudflare Pages : 25
+        Mo par fichier.
+      </div>
+      {#if estimation.video_max > TAILLE_MAX_FICHIER}
+        <div class="attention petit">Au pire, la vidéo pourrait dépasser 25 Mo : baisse le débit maximal ou raccourcis l'extrait.</div>
+      {/if}
     </div>
     <p class="discret petit">
       Source : {p.source.video.hauteur ? `${p.source.video.largeur}×${p.source.video.hauteur}, ` : ""}{p.source.video.ips.toLocaleString("fr-FR")} i/s
-      → {ipsCible(p.source.video.ips).toLocaleString("fr-FR")} i/s encodées (30 au plus). Plus le CRF est haut, plus le
-      fichier est léger. Limite Cloudflare Pages : 25 Mo par fichier.
+      → {ipsCible(p.source.video.ips).toLocaleString("fr-FR")} i/s encodées (30 au plus).
     </p>
     <div class="ligne">
       <button disabled={!modifies} onclick={() => ouvert.modifier({ encodage: { ...reglages, crf: Number(reglages.crf) } })}>Enregistrer les réglages</button>
@@ -141,8 +171,17 @@
     gap: 16px;
     align-items: start;
   }
-  .deux > * {
-    flex: 1;
+  .explication {
+    margin-top: -6px;
+  }
+  .estimation {
+    background: var(--fond-2);
+    border: 1px solid var(--bordure);
+    border-radius: var(--rayon-petit);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   td.ok {
     color: var(--ok);

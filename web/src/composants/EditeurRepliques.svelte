@@ -15,6 +15,7 @@
     selection,
     position,
     enLecture,
+    survol = true,
     onselect,
     onchange,
     onfin,
@@ -28,6 +29,8 @@
     selection: number | null;
     position: number;
     enLecture: boolean;
+    /** montre la réplique sous la souris */
+    survol?: boolean;
     onselect: (id: number | null) => void;
     onchange: (id: number, debut: number, fin: number) => void;
     /** fin d'un glisser : le moment d'enregistrer */
@@ -45,8 +48,11 @@
   const PX_S_MAX = 600;
   const LARGEUR_MAX = 20_000;
 
+  let enveloppe = $state<HTMLDivElement | null>(null);
   let defilement: HTMLDivElement;
   let canvas: HTMLCanvasElement;
+  let survolee = $state<{ id: number; x: number; y: number } | null>(null);
+  const repliqueSurvolee = $derived(survolee ? repliques.find((r) => r.id === survolee!.id) ?? null : null);
   let largeurVue = $state(800);
   let pxParS = $state(40);
   let ajuste = false;
@@ -273,8 +279,11 @@
     if (glisse.mode === "rien") {
       const c = toucher(e.clientX, e.clientY);
       canvas.style.cursor = c.mode === "gauche" || c.mode === "droite" ? "ew-resize" : c.mode === "deplacer" ? "grab" : "default";
+      const cadre = enveloppe!.getBoundingClientRect();
+      survolee = survol && c.id !== null ? { id: c.id, x: e.clientX - cadre.left, y: e.clientY - cadre.top } : null;
       return;
     }
+    survolee = null;
     if (Math.abs(e.clientX - glisse.x0) > SEUIL_PX) glisse.bouge = true;
     if (!glisse.bouge) return;
     const t = tempsA(e.clientX);
@@ -320,17 +329,74 @@
   }
 </script>
 
-<div class="defilement" bind:this={defilement} onwheel={molette}>
-  <canvas
-    bind:this={canvas}
-    style:height="{HAUTEUR}px"
-    onpointerdown={appui}
-    onpointermove={deplacement}
-    onpointerup={relache}
-  ></canvas>
+<div class="enveloppe" bind:this={enveloppe}>
+  <div class="defilement" bind:this={defilement} onwheel={molette}>
+    <canvas
+      bind:this={canvas}
+      style:height="{HAUTEUR}px"
+      onpointerdown={appui}
+      onpointermove={deplacement}
+      onpointerup={relache}
+      onpointerleave={() => (survolee = null)}
+    ></canvas>
+  </div>
+  {#if survolee && repliqueSurvolee}
+    {@const r = repliqueSurvolee}
+    <div
+      class="bulle"
+      style:left="{Math.min(survolee.x + 14, (enveloppe?.clientWidth ?? 800) - 330)}px"
+      style:top="{survolee.y + 16}px"
+    >
+      <div class="entete">
+        <span class="puce" style:--c={couleur(r.personnage)}></span>
+        <strong>{personnages.find((x) => x.id === r.personnage)?.nom ?? "Sans personnage"}</strong>
+        <span class="discret">#{r.id}</span>
+      </div>
+      <div class="texte">{r.texte || "(pas encore de texte)"}</div>
+      <div class="discret temps">
+        {(r.debut_ms / 1000).toFixed(2)} → {(r.fin_ms / 1000).toFixed(2)} s · {((r.fin_ms - r.debut_ms) / 1000).toFixed(2)} s
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
+  .enveloppe {
+    position: relative;
+  }
+  .bulle {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    width: 320px;
+    background: var(--panneau-2);
+    border: 1px solid var(--bordure-forte);
+    border-radius: var(--rayon-petit);
+    box-shadow: var(--ombre);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+  }
+  .bulle .entete {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .bulle .puce {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--c);
+  }
+  .bulle .texte {
+    font-size: 14px;
+  }
+  .bulle .temps {
+    font-size: 11.5px;
+    font-family: var(--police-mono);
+  }
   .defilement {
     width: 100%;
     overflow-x: auto;
