@@ -36,7 +36,8 @@
     /** fin d'un glisser : le moment d'enregistrer */
     onfin: () => void;
     oncreate: (debut: number, fin: number) => void;
-    onseek: (ms: number) => void;
+    /** glisse : la tête de lecture est en train d'être déplacée à la souris */
+    onseek: (ms: number, glisse?: boolean) => void;
   } = $props();
 
   const HAUTEUR = 190;
@@ -173,13 +174,22 @@
       ctx.fillRect(a, REGLE, Math.max(1, b - a), HAUTEUR - REGLE);
     }
 
-    // tête de lecture
+    // tête de lecture, avec sa poignée dans la règle (on peut l'attraper)
     const xp = Math.round(versX(position)) + 0.5;
     ctx.strokeStyle = "#f4efe6";
     ctx.beginPath();
     ctx.moveTo(xp, 0);
     ctx.lineTo(xp, HAUTEUR);
     ctx.stroke();
+    ctx.fillStyle = "#f4efe6";
+    ctx.beginPath();
+    ctx.moveTo(xp - 6, 0);
+    ctx.lineTo(xp + 6, 0);
+    ctx.lineTo(xp + 6, 7);
+    ctx.lineTo(xp, 13);
+    ctx.lineTo(xp - 6, 7);
+    ctx.closePath();
+    ctx.fill();
   }
 
   $effect(() => {
@@ -236,14 +246,15 @@
   }
 
   // ---- souris ----
-  type Mode = "rien" | "deplacer" | "gauche" | "droite" | "creer";
+  type Mode = "rien" | "tete" | "deplacer" | "gauche" | "droite" | "creer";
   let glisse = { mode: "rien" as Mode, id: null as number | null, prise: 0, depart: 0, x0: 0, bouge: false };
 
   const tempsA = (clientX: number) => borner((clientX - canvas.getBoundingClientRect().left) / pxParMs, 0, dureeMs);
 
   function toucher(clientX: number, clientY: number): { mode: Mode; id: number | null } {
     const y = clientY - canvas.getBoundingClientRect().top;
-    if (y < REGLE) return { mode: "rien", id: null };
+    // la règle sert à déplacer la tête de lecture
+    if (y < REGLE) return { mode: "tete", id: null };
     const t = tempsA(clientX);
     const tolerance = POIGNEE_PX / pxParMs;
     let bord: { id: number; mode: Mode; distance: number } | null = null;
@@ -254,6 +265,7 @@
       if (dr <= tolerance && (!bord || dr < bord.distance)) bord = { id: r.id, mode: "droite", distance: dr };
     }
     if (bord) return { mode: bord.mode, id: bord.id };
+    if (Math.abs(t - position) <= tolerance) return { mode: "tete", id: null };
     let corps: { id: number; w: number } | null = null;
     for (const r of repliques) {
       if (t > r.debut_ms && t < r.fin_ms && (!corps || r.fin_ms - r.debut_ms < corps.w)) corps = { id: r.id, w: r.fin_ms - r.debut_ms };
@@ -262,12 +274,20 @@
   }
 
   function appui(e: PointerEvent) {
-    canvas.setPointerCapture(e.pointerId);
+    // pas de sélection de texte ni de glisser natif ; un champ en cours de saisie perd le focus
+    e.preventDefault();
+    (document.activeElement as HTMLElement | null)?.blur();
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // pointeur déjà relâché : le glisser continue sans capture
+    }
     const cible = toucher(e.clientX, e.clientY);
     const t = tempsA(e.clientX);
-    if (cible.mode === "rien") {
-      onseek(t);
-      glisse.mode = "rien";
+    survolee = null;
+    if (cible.mode === "tete") {
+      glisse = { mode: "tete", id: null, prise: 0, depart: t, x0: e.clientX, bouge: false };
+      onseek(t, true);
       return;
     }
     const r = cible.id !== null ? repliques.find((x) => x.id === cible.id) : undefined;
@@ -278,12 +298,17 @@
   function deplacement(e: PointerEvent) {
     if (glisse.mode === "rien") {
       const c = toucher(e.clientX, e.clientY);
-      canvas.style.cursor = c.mode === "gauche" || c.mode === "droite" ? "ew-resize" : c.mode === "deplacer" ? "grab" : "default";
+      canvas.style.cursor =
+        c.mode === "gauche" || c.mode === "droite" || c.mode === "tete" ? "ew-resize" : c.mode === "deplacer" ? "grab" : "default";
       const cadre = enveloppe!.getBoundingClientRect();
       survolee = survol && c.id !== null ? { id: c.id, x: e.clientX - cadre.left, y: e.clientY - cadre.top } : null;
       return;
     }
     survolee = null;
+    if (glisse.mode === "tete") {
+      onseek(tempsA(e.clientX), true);
+      return;
+    }
     if (Math.abs(e.clientX - glisse.x0) > SEUIL_PX) glisse.bouge = true;
     if (!glisse.bouge) return;
     const t = tempsA(e.clientX);
@@ -305,7 +330,9 @@
   function relache(e: PointerEvent) {
     const g = glisse;
     glisse = { ...glisse, mode: "rien", id: null };
-    if (g.mode === "creer") {
+    if (g.mode === "tete") {
+      onseek(tempsA(e.clientX), false);
+    } else if (g.mode === "creer") {
       const prov = provisoire;
       provisoire = null;
       if (g.bouge && prov) {
@@ -334,6 +361,7 @@
     <canvas
       bind:this={canvas}
       style:height="{HAUTEUR}px"
+      draggable="false"
       onpointerdown={appui}
       onpointermove={deplacement}
       onpointerup={relache}
@@ -363,6 +391,8 @@
 <style>
   .enveloppe {
     position: relative;
+    user-select: none;
+    -webkit-user-select: none;
   }
   .bulle {
     position: absolute;
@@ -408,5 +438,6 @@
   canvas {
     display: block;
     touch-action: none;
+    -webkit-user-drag: none;
   }
 </style>

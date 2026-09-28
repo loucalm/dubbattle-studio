@@ -82,6 +82,7 @@ export const api = {
 
   creerProjet: (chemin: string, titre: string) => requete<Projet>("POST", "/api/projets", { chemin, titre }),
   ouvrirPublie: (id: string) => requete<Projet>("POST", `/api/publies/${encodeURIComponent(id)}/ouvrir`, {}),
+  retirer: (id: string, pousser: boolean) => requete<Tache>("POST", `/api/publies/${encodeURIComponent(id)}/retirer`, { pousser }),
   projet: (id: string) => requete<DetailProjet>("GET", projet(id)),
   modifier: (id: string, m: ModificationProjet) => requete<Projet>("PATCH", projet(id), m),
   supprimer: (id: string) => requete<unknown>("DELETE", projet(id)),

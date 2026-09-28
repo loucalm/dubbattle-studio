@@ -141,6 +141,21 @@
     if (sonImage) lecteur.apercu(cible, Math.max(dureeImageMs, 60) * (Math.abs(images) > 1 ? 4 : 1));
   }
 
+  /** Tête de lecture attrapée à la souris : lecture en pause, et un bref son si l'option est active. */
+  let dernierSon = 0;
+  function deplacerTete(ms: number, glisse = false) {
+    if (glisse && lecteur.enLecture) {
+      lecteur.pause();
+      enLecture = false;
+    }
+    lecteur.aller(ms);
+    position = ms;
+    if (glisse && sonImage && performance.now() - dernierSon > 70) {
+      dernierSon = performance.now();
+      lecteur.apercu(ms, 70);
+    }
+  }
+
   function basculerEcoute(quoi: "voice" | "original") {
     entendre = quoi;
     lecteur.solo(quoi);
@@ -480,7 +495,7 @@
     onchange={(id, debut, fin) => modifierReplique(id, { debut_ms: debut, fin_ms: fin })}
     onfin={() => changer(true)}
     oncreate={(debut, fin) => selectionner(nouvelleReplique(debut, fin).id)}
-    onseek={(ms) => lecteur.aller(ms)}
+    onseek={(ms, glisse) => deplacerTete(ms, glisse)}
   />
   <p class="discret petit">
     <kbd>Espace</kbd> lecture · <kbd>←</kbd> <kbd>→</kbd> image par image (<kbd>Maj</kbd> : 1 s) · <kbd>Entrée</kbd> écouter la réplique ·

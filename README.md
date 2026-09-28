@@ -33,3 +33,7 @@ Puis ouvrir http://localhost:5180.
 8. **Publication** : aperçu des fichiers, puis commit et push dans `../extraits`.
 
 Un extrait déjà publié se rouvre depuis la bibliothèque (« Publiés »), même sur un autre PC : répliques et infos sont modifiables tout de suite, le reste dès que la source est retrouvée.
+
+Sur les timelines (découpe, répliques), la tête de lecture s'attrape à la souris : dans la règle en haut, ou sur sa ligne.
+
+Pour supprimer un extrait : la croix sur sa carte dans la bibliothèque (ou « Supprimer… » à l'étape 1). On choisit de supprimer le projet de travail, de retirer l'extrait du jeu (commit et push dans le dépôt des extraits), ou les deux.

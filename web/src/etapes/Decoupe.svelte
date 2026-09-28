@@ -232,7 +232,13 @@
       {entree}
       {sortie}
       {position}
-      onseek={(ms) => aller(ms)}
+      onseek={(ms, glisse) => {
+        if (glisse) {
+          lectureSelection = false;
+          elementVideo?.pause();
+        }
+        aller(ms);
+      }}
       onentree={(ms) => marquerEntree(ms)}
       onsortie={(ms) => marquerSortie(ms)}
     />

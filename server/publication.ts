@@ -2,13 +2,13 @@
 // Toujours montrer ce qui va être publié avant de pousser : voir apercuPublication().
 
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.ts";
 import { erreursBloquantes, controler } from "./controle.ts";
 import { empreinteFichier } from "./fichiers.ts";
 import { executer } from "./processus.ts";
-import { lireProjet, modifierProjet, ErreurHttp } from "./projets.ts";
+import { lireProjet, modifierProjet, ErreurHttp, projetExiste } from "./projets.ts";
 import { chargerValideurs } from "./schemas.ts";
 import { lancerTache, type ContexteTache } from "./taches.ts";
 import { dossierExtraitPublie } from "./travaux.ts";
@@ -93,6 +93,22 @@ async function lireTexte(chemin: string): Promise<string | null> {
   }
 }
 
+/**
+ * Dernière version_medias d'un extrait retiré du jeu puis republié sous le même identifiant : les
+ * médias restent un an en cache avec ?v=<version>, une nouvelle version 1 ferait revoir les anciens.
+ */
+async function versionRetiree(id: string): Promise<number> {
+  const chemin = `extraits/${id}/info.json`;
+  const commit = (await git(["log", "-1", "--format=%H", "--diff-filter=D", "--", chemin]).catch(() => null))?.stdout.trim();
+  if (!commit) return 0;
+  try {
+    const { stdout } = await git(["show", `${commit}^:${chemin}`]);
+    return (JSON.parse(stdout) as InfoJson).version_medias;
+  } catch {
+    return 0;
+  }
+}
+
 async function preparer(id: string): Promise<Plan> {
   const projet = await lireProjet(id);
   const dossier = dossierExtraitPublie(id);
@@ -111,7 +127,9 @@ async function preparer(id: string): Promise<Plan> {
   }
   // version_medias n'augmente que si un fichier de medias/ change (fiche 7.10)
   const versionPubliee = nouveau ? 0 : (JSON.parse(infoPubliee) as InfoJson).version_medias;
-  const version_medias = nouveau ? 1 : versionPubliee + (medias.some((m) => m.etat !== "inchange") ? 1 : 0);
+  const version_medias = nouveau
+    ? (await versionRetiree(id)) + 1
+    : versionPubliee + (medias.some((m) => m.etat !== "inchange") ? 1 : 0);
 
   const json: Plan["json"] = [];
   const fabrication = construireFabrication(projet);
@@ -234,11 +252,52 @@ async function executerPublication(id: string, message: string, pousser: boolean
 
   if (pousser) {
     ctx.progression(0.7, "Envoi vers GitHub (git push)");
-    const amont = await git(["rev-parse", "--abbrev-ref", "@{u}"]).catch(() => null);
-    await git(amont ? ["push"] : ["push", "-u", "origin", "HEAD"], { signal: ctx.signal });
+    await pousserDepot(ctx.signal);
     attendreDeploiement(id, plan.version_medias);
   }
   return commit;
+}
+
+async function pousserDepot(signal: AbortSignal): Promise<void> {
+  const amont = await git(["rev-parse", "--abbrev-ref", "@{u}"]).catch(() => null);
+  await git(amont ? ["push"] : ["push", "-u", "origin", "HEAD"], { signal });
+}
+
+/**
+ * Retire un extrait du jeu : ses fichiers quittent le dépôt et le catalogue, puis commit et push.
+ * L'historique git les garde : on peut le republier plus tard.
+ */
+export function lancerRetrait(id: string, pousser: boolean): Tache {
+  if (!existsSync(join(dossierExtraitPublie(id), "info.json"))) throw new ErreurHttp(404, `« ${id} » n'est pas publié.`);
+  return lancerTache({ projet: id, type: "publication", libelle: "Retrait du jeu" }, (ctx) =>
+    unParUn(async () => {
+      const depot = await etatDepot(id);
+      if (depot.en_retard) throw new Error("Le dépôt des extraits est en retard sur GitHub : fais un « git pull » dans extraits/.");
+      ctx.progression(0.2, "Suppression des fichiers");
+      await rm(dossierExtraitPublie(id), { recursive: true, force: true });
+      await regenererCatalogue();
+      ctx.progression(0.5, "Commit");
+      const chemins = [`extraits/${id}`, "catalogue.json"];
+      await git(["add", "-A", "--", ...chemins]);
+      await git(["commit", "-m", `Retrait de ${id}`, "--", ...chemins], { signal: ctx.signal });
+      const commit = (await git(["rev-parse", "--short", "HEAD"])).stdout.trim();
+      if (projetExiste(id)) {
+        const dossier = dossierExtraitPublie(id);
+        await modifierProjet(id, (p) => {
+          p.publication = null;
+          // un projet rouvert depuis l'extrait publié s'appuyait sur ses fichiers, qui n'existent plus
+          for (const media of MEDIAS) if (p.sortie[media]?.fichier.startsWith(dossier)) delete p.sortie[media];
+          if (p.voice?.origine === "publie") p.voice = null;
+          if (p.bed?.origine === "publie") p.bed = null;
+        });
+      }
+      if (pousser) {
+        ctx.progression(0.7, "Envoi vers GitHub (git push)");
+        await pousserDepot(ctx.signal);
+      }
+      ctx.terminer(pousser ? `Retiré du jeu (commit ${commit}, poussé sur GitHub).` : `Retiré (commit ${commit}, pas encore poussé).`);
+    }),
+  );
 }
 
 export function lancerPublication(id: string, message: string, pousser: boolean): Tache {

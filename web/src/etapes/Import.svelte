@@ -3,6 +3,7 @@
   import BarreTache from "../composants/BarreTache.svelte";
   import EnteteEtape from "../composants/EnteteEtape.svelte";
   import Explorateur from "../composants/Explorateur.svelte";
+  import SuppressionExtrait from "../composants/SuppressionExtrait.svelte";
   import { api } from "../lib/api.ts";
   import { tailleLisible } from "../lib/outils.ts";
   import type { ProjetOuvert } from "../lib/projet.svelte.ts";
@@ -15,7 +16,7 @@
   const p = $derived(d.projet);
   const s = $derived(p.source);
   let relier = $state(false);
-  let confirmationSuppression = $state(false);
+  let suppression = $state(false);
 
   const tachesSource = $derived(
     (["empreinte", "pics", "apercu", "recherche_source"] as const)
@@ -36,10 +37,6 @@
     }
   }
 
-  async function supprimer() {
-    const r = await ouvert.action(() => api.supprimer(p.id));
-    if (r) studio.aller({ ecran: "bibliotheque" });
-  }
 
   const nomLangue = (code: string | null) =>
     ({ fre: "français", fra: "français", eng: "anglais", spa: "espagnol", ger: "allemand", deu: "allemand", ita: "italien", jpn: "japonais" })[
@@ -136,22 +133,24 @@
     {/if}
 
     <h2 class="espace-haut">Projet</h2>
-    {#if confirmationSuppression}
-      <div class="message erreur pile">
-        <span>
-          Supprimer l'espace de travail de <code>{p.id}</code> (WAV, aperçus, encodages) ?
-          {p.publication ? " L'extrait publié n'est pas touché." : ""}
-        </span>
-        <div class="ligne">
-          <button class="danger" onclick={supprimer}>Supprimer</button>
-          <button onclick={() => (confirmationSuppression = false)}>Annuler</button>
-        </div>
-      </div>
-    {:else}
-      <div><button class="danger" onclick={() => (confirmationSuppression = true)}>Supprimer le projet…</button></div>
-    {/if}
+    <div><button class="danger" onclick={() => (suppression = true)}>Supprimer…</button></div>
   </section>
 </div>
+
+{#if suppression}
+  <SuppressionExtrait
+    id={p.id}
+    titre={p.infos.titre}
+    projet={true}
+    publie={d.publie}
+    onfermer={() => (suppression = false)}
+    onfini={(fait) => {
+      suppression = false;
+      if (fait.projet) studio.aller({ ecran: "bibliotheque" });
+      else ouvert.notifier("Retrait du jeu lancé.", "ok");
+    }}
+  />
+{/if}
 
 {#if relier}
   <Explorateur

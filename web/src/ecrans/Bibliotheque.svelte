@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import NouvelExtrait from "../composants/NouvelExtrait.svelte";
   import Reglages from "../composants/Reglages.svelte";
+  import SuppressionExtrait from "../composants/SuppressionExtrait.svelte";
   import { api } from "../lib/api.ts";
   import { dateLisible } from "../lib/outils.ts";
   import { studio } from "../lib/studio.svelte.ts";
@@ -13,6 +14,8 @@
   let erreur = $state<string | null>(null);
   let reglages = $state(false);
   let ouverture = $state<string | null>(null);
+  let aSupprimer = $state<{ id: string; titre: string; projet: boolean; publie: boolean } | null>(null);
+  let message = $state<string | null>(null);
 
   async function charger() {
     try {
@@ -38,6 +41,17 @@
     } finally {
       ouverture = null;
     }
+  }
+
+  const estPublie = (id: string) => (biblio?.publies ?? []).some((e) => e.id === id);
+
+  function supprime(titre: string, fait: { projet: boolean; retrait: boolean }) {
+    aSupprimer = null;
+    message = [fait.projet ? "projet supprimé" : "", fait.retrait ? "retrait du jeu lancé (voir en bas à droite)" : ""]
+      .filter(Boolean)
+      .join(", ");
+    message = `« ${titre} » : ${message}.`;
+    void charger();
   }
 
   const o = $derived(studio.serveur?.outils);
@@ -72,6 +86,7 @@
     <p class="message attention">Des outils manquent (voir Réglages) : le Studio ne pourra pas tout faire.</p>
   {/if}
   {#if erreur}<p class="message erreur">{erreur}</p>{/if}
+  {#if message}<p class="message ok">{message}</p>{/if}
 
   <section class="pile">
     <h2>Nouvel extrait</h2>
@@ -85,24 +100,32 @@
     {/if}
     <div class="grille">
       {#each biblio?.projets ?? [] as p (p.id)}
-        <button class="carte" onclick={() => studio.aller({ ecran: "projet", id: p.id, etape: p.duree_ms ? "repliques" : "import" })}>
-          <img src={api.urlMedia(p.id, "sortie-vignette")} alt="" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
-          <div class="texte">
-            <strong>{p.titre || p.id}</strong>
-            <span class="mono discret petit">{p.id}</span>
-            <span class="discret petit">{p.source_nom}</span>
-            <div class="ligne petit">
-              {#if p.duree_ms}<span>{formaterDuree(p.duree_ms)}</span>{/if}
-              {#if p.publication}
-                <span class="pastille ok">Publié · v{p.publication.version_medias}</span>
-              {:else}
-                <span class="pastille">Jamais publié</span>
-              {/if}
-              <span class="espaceur"></span>
-              <span class="discret">{dateLisible(p.modifie_le)}</span>
+        <div class="carte">
+          <button class="ouvrir" onclick={() => studio.aller({ ecran: "projet", id: p.id, etape: p.duree_ms ? "repliques" : "import" })}>
+            <img src={api.urlMedia(p.id, "sortie-vignette")} alt="" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
+            <div class="texte">
+              <strong>{p.titre || p.id}</strong>
+              <span class="mono discret petit">{p.id}</span>
+              <span class="discret petit">{p.source_nom}</span>
+              <div class="ligne petit">
+                {#if p.duree_ms}<span>{formaterDuree(p.duree_ms)}</span>{/if}
+                {#if p.publication}
+                  <span class="pastille ok">Publié · v{p.publication.version_medias}</span>
+                {:else}
+                  <span class="pastille">Jamais publié</span>
+                {/if}
+                <span class="espaceur"></span>
+                <span class="discret">{dateLisible(p.modifie_le)}</span>
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
+          <button
+            class="supprimer discret petit"
+            title="Supprimer…"
+            aria-label="Supprimer {p.titre || p.id}"
+            onclick={() => (aSupprimer = { id: p.id, titre: p.titre, projet: true, publie: estPublie(p.id) })}>✕</button
+          >
+        </div>
       {/each}
     </div>
   </section>
@@ -122,9 +145,14 @@
               <td class="discret">{formaterDuree(e.duree_ms)}</td>
               <td class="discret">v{e.version_medias}</td>
               <td style="text-align:right">
-                <button class="petit" disabled={ouverture !== null} onclick={() => ouvrirPublie(e.id)}>
-                  {ouverture === e.id ? "Ouverture…" : "Ouvrir pour modifier"}
-                </button>
+                <div class="ligne actions">
+                  <button class="petit" disabled={ouverture !== null} onclick={() => ouvrirPublie(e.id)}>
+                    {ouverture === e.id ? "Ouverture…" : "Ouvrir pour modifier"}
+                  </button>
+                  <button class="petit danger" onclick={() => (aSupprimer = { id: e.id, titre: e.titre, projet: false, publie: true })}>
+                    Retirer du jeu…
+                  </button>
+                </div>
               </td>
             </tr>
           {/each}
@@ -135,6 +163,18 @@
 </div>
 
 {#if reglages}<Reglages onfermer={() => (reglages = false)} />{/if}
+
+{#if aSupprimer}
+  {@const cible = aSupprimer}
+  <SuppressionExtrait
+    id={cible.id}
+    titre={cible.titre}
+    projet={cible.projet}
+    publie={cible.publie}
+    onfermer={() => (aSupprimer = null)}
+    onfini={(fait) => supprime(cible.titre || cible.id, fait)}
+  />
+{/if}
 
 <style>
   .page {
@@ -166,6 +206,10 @@
     gap: 12px;
   }
   .carte {
+    position: relative;
+  }
+  .ouvrir {
+    width: 100%;
     display: flex;
     gap: 12px;
     align-items: stretch;
@@ -176,10 +220,29 @@
     border-radius: var(--rayon);
     white-space: normal;
   }
-  .carte:hover {
+  .ouvrir:hover {
     border-color: var(--or-sombre);
+    background: var(--panneau);
   }
-  .carte img {
+  .supprimer {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .carte:hover .supprimer,
+  .supprimer:focus-visible {
+    opacity: 1;
+  }
+  .supprimer:hover {
+    color: var(--erreur);
+  }
+  .actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+  .ouvrir img {
     width: 120px;
     height: 68px;
     object-fit: cover;

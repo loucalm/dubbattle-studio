@@ -21,7 +21,8 @@
     entree: number | null;
     sortie: number | null;
     position: number;
-    onseek: (ms: number) => void;
+    /** glisse : la tête de lecture est en train d'être déplacée à la souris */
+    onseek: (ms: number, glisse?: boolean) => void;
     onentree: (ms: number) => void;
     onsortie: (ms: number) => void;
   } = $props();
@@ -137,13 +138,22 @@
       ctx.fillText(lettre, lettre === "E" ? x + 3.5 : x - 10.5, REGLE + 7.5);
     }
 
-    // tête de lecture
+    // tête de lecture, avec sa poignée dans la règle (on peut l'attraper)
     const xp = Math.round(versX(position)) + 0.5;
     ctx.strokeStyle = "#f4efe6";
     ctx.beginPath();
     ctx.moveTo(xp, 0);
     ctx.lineTo(xp, HAUTEUR);
     ctx.stroke();
+    ctx.fillStyle = "#f4efe6";
+    ctx.beginPath();
+    ctx.moveTo(xp - 6, 0);
+    ctx.lineTo(xp + 6, 0);
+    ctx.lineTo(xp + 6, 7);
+    ctx.lineTo(xp, 13);
+    ctx.lineTo(xp - 6, 7);
+    ctx.closePath();
+    ctx.fill();
   }
 
   $effect(() => {
@@ -160,34 +170,56 @@
   });
 
   // ---- interactions ----
-  type Glisse = { mode: "entree" | "sortie" | "defiler"; x0: number; vue0: typeof vue; bouge: boolean } | null;
+  type Mode = "entree" | "sortie" | "tete" | "defiler";
+  type Glisse = { mode: Mode; x0: number; vue0: typeof vue; bouge: boolean } | null;
   let glisse: Glisse = null;
 
   function localX(e: PointerEvent | WheelEvent) {
     return e.clientX - canvas.getBoundingClientRect().left;
   }
 
-  function appui(e: PointerEvent) {
-    canvas.setPointerCapture(e.pointerId);
+  /** Ce qu'on attrape : entrée ou sortie, sinon la tête de lecture (sur sa ligne ou dans la règle). */
+  function cible(e: PointerEvent): Mode {
     const x = localX(e);
-    let mode: "entree" | "sortie" | "defiler" = "defiler";
-    if (entree !== null && Math.abs(x - versX(entree)) <= POIGNEE_PX) mode = "entree";
-    else if (sortie !== null && Math.abs(x - versX(sortie)) <= POIGNEE_PX) mode = "sortie";
+    const y = e.clientY - canvas.getBoundingClientRect().top;
+    if (y < REGLE) return "tete";
+    if (entree !== null && Math.abs(x - versX(entree)) <= POIGNEE_PX) return "entree";
+    if (sortie !== null && Math.abs(x - versX(sortie)) <= POIGNEE_PX) return "sortie";
+    if (Math.abs(x - versX(position)) <= POIGNEE_PX) return "tete";
+    return "defiler";
+  }
+
+  const tempsA = (x: number) => Math.max(0, Math.min(dureeMs, versMs(x)));
+
+  function appui(e: PointerEvent) {
+    // pas de sélection de texte ni de glisser natif en partant de la timeline
+    e.preventDefault();
+    (document.activeElement as HTMLElement | null)?.blur();
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // pointeur déjà relâché : le glisser continue sans capture
+    }
+    const x = localX(e);
+    const mode = cible(e);
     glisse = { mode, x0: x, vue0: { ...vue }, bouge: false };
+    if (mode === "tete") onseek(tempsA(x), true);
   }
 
   function deplacement(e: PointerEvent) {
     const x = localX(e);
     if (!glisse) {
-      const proche =
-        (entree !== null && Math.abs(x - versX(entree)) <= POIGNEE_PX) ||
-        (sortie !== null && Math.abs(x - versX(sortie)) <= POIGNEE_PX);
-      canvas.style.cursor = proche ? "ew-resize" : "default";
+      const mode = cible(e);
+      canvas.style.cursor = mode === "defiler" ? "default" : "ew-resize";
+      return;
+    }
+    if (glisse.mode === "tete") {
+      onseek(tempsA(x), true);
       return;
     }
     if (Math.abs(x - glisse.x0) > 3) glisse.bouge = true;
     if (!glisse.bouge) return;
-    const t = Math.max(0, Math.min(dureeMs, versMs(x)));
+    const t = tempsA(x);
     if (glisse.mode === "entree") onentree(t);
     else if (glisse.mode === "sortie") onsortie(t);
     else {
@@ -197,7 +229,8 @@
   }
 
   function relache(e: PointerEvent) {
-    if (glisse && !glisse.bouge) onseek(Math.max(0, Math.min(dureeMs, versMs(localX(e)))));
+    if (glisse?.mode === "tete") onseek(tempsA(localX(e)), false);
+    else if (glisse && !glisse.bouge) onseek(tempsA(localX(e)));
     glisse = null;
   }
 
@@ -221,6 +254,7 @@
   <canvas
     bind:this={canvas}
     style:height="{HAUTEUR}px"
+    draggable="false"
     onpointerdown={appui}
     onpointermove={deplacement}
     onpointerup={relache}
@@ -233,6 +267,8 @@
   .timeline {
     position: relative;
     width: 100%;
+    user-select: none;
+    -webkit-user-select: none;
     border: 1px solid var(--bordure);
     border-radius: var(--rayon-petit);
     overflow: hidden;
@@ -241,6 +277,7 @@
     display: block;
     width: 100%;
     touch-action: none;
+    -webkit-user-drag: none;
   }
   .attente {
     position: absolute;

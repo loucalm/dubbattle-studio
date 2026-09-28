@@ -12,7 +12,7 @@ import { chercherParNomEtTaille, dossiersUtilisateur, ecrireReglages, listerDoss
 import { envoyerFichier, Routeur } from "./http.ts";
 import { executer } from "./processus.ts";
 import { chemins, ErreurHttp, lireProjet, listerProjets, projetExiste, renommerProjet, supprimerProjet } from "./projets.ts";
-import { apercuPublication, lancerPublication } from "./publication.ts";
+import { apercuPublication, lancerPublication, lancerRetrait } from "./publication.ts";
 import { exporterPiste, recevoirImport, supprimerImport, validerImport } from "./retouche.ts";
 import { etatPython } from "./python.ts";
 import { annulerTache, annulerTachesProjet, listerTaches, tachesActives } from "./taches.ts";
@@ -193,6 +193,12 @@ routeur.post("/api/projets", async ({ corps }) => {
 });
 
 routeur.post("/api/publies/:id/ouvrir", ({ params }) => ouvrirExtraitPublie(params.id));
+
+/** Retirer un extrait du jeu (dépôt des extraits, catalogue, commit et push). */
+routeur.post("/api/publies/:id/retirer", async ({ params, corps }) => {
+  const { pousser } = (await corps()) as { pousser?: boolean };
+  return lancerRetrait(params.id, pousser !== false);
+});
 
 routeur.get("/api/projets/:id", async ({ params }) => {
   const projet = await lireProjet(params.id);
