@@ -13,8 +13,11 @@ import {
   type RepliquesJson,
 } from "./types.ts";
 
-/** Catégories proposées à l'étape 5 (on peut aussi en écrire une autre). */
-export const CATEGORIES = ["Film", "Série", "Animation", "Clip", "Musique", "Mème", "Pub", "Jeu vidéo", "Télé"];
+/**
+ * Catégories proposées à l'étape 5 (on peut aussi en écrire une autre). Ce sont des genres :
+ * la longueur (court, moyen, long) est calculée par le jeu à partir de la durée (fiche 4.3).
+ */
+export const CATEGORIES = ["Film", "Série", "YouTube", "Animation", "Musique", "Pub", "Jeu vidéo", "Télé"];
 
 export function dureeExtrait(projet: Pick<Projet, "decoupe">): number {
   return projet.decoupe ? projet.decoupe.sortie_ms - projet.decoupe.entree_ms : 0;
