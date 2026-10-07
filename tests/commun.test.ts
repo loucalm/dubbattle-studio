@@ -113,6 +113,23 @@ describe("encodage", () => {
     expect(argumentImagesCles(4000, debuts)).toBe("0.000,1.000,2.000,3.000,3.200");
   });
 
+  it("le débit audio ne touche que son fichier, et pas aux valeurs par défaut", () => {
+    const projet = exempleProjet();
+    const avant = (m: "video" | "voice" | "bed") => recette(m, projet);
+    const [video, voice, bed] = [avant("video"), avant("voice"), avant("bed")];
+    // Recette d'avant le réglage des débits : rien ne doit être à refaire
+    expect(voice).not.toContain("kbps");
+    projet.encodage.voice_kbps = 40;
+    expect(avant("voice")).not.toBe(voice);
+    expect(avant("bed")).toBe(bed);
+    expect(avant("video")).toBe(video);
+    projet.encodage.voice_kbps = 48;
+    projet.encodage.bed_kbps = 64;
+    expect(avant("voice")).toBe(voice);
+    expect(avant("bed")).not.toBe(bed);
+    expect(avant("video")).toBe(video);
+  });
+
   it("ne refait que ce qui a changé", () => {
     const projet = exempleProjet();
     for (const media of ["video", "voice", "bed", "vignette"] as const) {

@@ -454,7 +454,7 @@ export async function encoderVideo(
 }
 
 /**
- * Voice (mono 48 kbps) ou bed (stéréo 96 kbps), avec le même gain sur les deux pour garder
+ * Voice (mono, 48 kbps par défaut) ou bed (stéréo, 96 kbps par défaut), avec le même gain sur les deux pour garder
  * l'équilibre voix / fond. Le limiteur à -1 dB évite la saturation sans toucher au niveau
  * (level=0) ni décaler le son (latency=1 compense son anticipation).
  */
@@ -462,6 +462,7 @@ export async function encoderPisteAudio(
   wav: string,
   type: "voice" | "bed",
   gainDb: number,
+  kbps: number,
   dureeMs: number,
   dest: string,
   suivi: Suivi,
@@ -486,7 +487,7 @@ export async function encoderPisteAudio(
         "-c:a",
         "aac",
         "-b:a",
-        type === "voice" ? "48k" : "96k",
+        `${kbps}k`,
         "-map_metadata",
         "-1",
         "-movflags",

@@ -4,7 +4,16 @@
 
 import type { ChoixPiste, Media, PisteFabrication, Projet, ReglagesEncodage, Replique } from "./types.ts";
 
-export const REGLAGES_ENCODAGE_DEFAUT: ReglagesEncodage = { hauteur: 720, crf: 26, debit_max: "2M" };
+export const REGLAGES_ENCODAGE_DEFAUT: ReglagesEncodage = {
+  hauteur: 720,
+  crf: 26,
+  debit_max: "2M",
+  voice_kbps: 48,
+  bed_kbps: 96,
+};
+/** Débits AAC proposés (kbit/s) : en dessous, l'encodeur AAC de ffmpeg devient audiblement abîmé. */
+export const DEBITS_VOICE_POSSIBLES = [32, 40, 48, 64];
+export const DEBITS_BED_POSSIBLES = [64, 80, 96, 128];
 export const HAUTEURS_POSSIBLES = [720, 480];
 export const IPS_MAX = 30;
 export const LUFS_CIBLE = -16;
@@ -95,12 +104,26 @@ function recetteBrute(media: Media, projet: Projet): string | null {
   const base = { source: source.empreinte, decoupe };
   switch (media) {
     case "video":
-      return JSON.stringify({ ...base, ...encodage, ips: ipsCible(source.video.ips) });
+      return JSON.stringify({
+        ...base,
+        hauteur: encodage.hauteur,
+        crf: encodage.crf,
+        debit_max: encodage.debit_max,
+        ips: ipsCible(source.video.ips),
+      });
     case "voice":
     case "bed": {
       const choix = projet[media];
       if (!choix || projet.gain_db === null) return null;
-      return JSON.stringify({ ...base, piste: identitePiste(choix, projet), gain_db: projet.gain_db });
+      // Le débit n'entre dans la recette que s'il n'est pas celui par défaut : les fichiers déjà encodés restent à jour
+      const kbps = media === "voice" ? encodage.voice_kbps : encodage.bed_kbps;
+      const defaut = REGLAGES_ENCODAGE_DEFAUT[media === "voice" ? "voice_kbps" : "bed_kbps"];
+      return JSON.stringify({
+        ...base,
+        piste: identitePiste(choix, projet),
+        gain_db: projet.gain_db,
+        ...(kbps !== defaut ? { kbps } : {}),
+      });
     }
     case "vignette":
       return JSON.stringify({ source: source.empreinte, instant_ms: decoupe.entree_ms + projet.infos.vignette_ms });
@@ -153,6 +176,6 @@ export function estimerTailles(
   return {
     video_probable: octets(Math.min(plafond, typique)),
     video_max: octets(plafond),
-    audio: octets(48_000 + 96_000),
+    audio: octets((reglages.voice_kbps + reglages.bed_kbps) * 1000),
   };
 }

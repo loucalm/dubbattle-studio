@@ -28,6 +28,8 @@ import {
 import { separer, transcrire } from "./python.ts";
 import { lancerTache, tacheActive, type ContexteTache } from "./taches.ts";
 import {
+  DEBITS_BED_POSSIBLES,
+  DEBITS_VOICE_POSSIBLES,
   debutsRepliques,
   etatMedia,
   gainPourLoudness,
@@ -347,11 +349,13 @@ export async function appliquerModification(id: string, m: ModificationProjet): 
     }
 
     if (m.encodage) {
-      const { hauteur, crf, debit_max } = m.encodage;
+      const { hauteur, crf, debit_max, voice_kbps, bed_kbps } = m.encodage;
       if (!HAUTEURS_POSSIBLES.includes(hauteur)) throw new ErreurHttp(400, "Hauteur non prévue.");
       if (!Number.isInteger(crf) || crf < 16 || crf > 36) throw new ErreurHttp(400, "CRF entre 16 et 36.");
       if (!/^\d+(\.\d+)?[kM]$/.test(debit_max)) throw new ErreurHttp(400, "Débit maximal invalide (ex. 2M).");
-      p.encodage = { hauteur, crf, debit_max };
+      if (!DEBITS_VOICE_POSSIBLES.includes(voice_kbps)) throw new ErreurHttp(400, "Débit de la voice non prévu.");
+      if (!DEBITS_BED_POSSIBLES.includes(bed_kbps)) throw new ErreurHttp(400, "Débit du bed non prévu.");
+      p.encodage = { hauteur, crf, debit_max, voice_kbps, bed_kbps };
     }
   });
   if (sourceAPreparer) preparerSource(projet);
@@ -520,7 +524,8 @@ export function lancerEncodage(id: string, recalerImagesCles: boolean): Tache {
       } else {
         const wav = wavPiste(p, media);
         if (!wav) throw new Error(`Pas de WAV de travail pour la ${media} : relance une séparation (étape 3).`);
-        await encoderPisteAudio(wav, media, p.gain_db!, duree, dest, suivi);
+        const kbps = media === "voice" ? p.encodage.voice_kbps : p.encodage.bed_kbps;
+        await encoderPisteAudio(wav, media, p.gain_db!, kbps, duree, dest, suivi);
       }
       const { size } = await stat(dest);
       const empreinte = await empreinteFichier(dest);
@@ -625,7 +630,14 @@ export async function ouvrirExtraitPublie(id: string): Promise<Projet> {
       langue: info.langue,
       vignette_ms: fab.vignette_ms,
     },
-    encodage: { hauteur: fab.encodage.hauteur, crf: fab.encodage.crf, debit_max: fab.encodage.debit_max },
+    encodage: {
+      hauteur: fab.encodage.hauteur,
+      crf: fab.encodage.crf,
+      debit_max: fab.encodage.debit_max,
+      // fabrication.json d'avant le réglage des débits audio
+      voice_kbps: fab.encodage.voice_kbps ?? REGLAGES_ENCODAGE_DEFAUT.voice_kbps,
+      bed_kbps: fab.encodage.bed_kbps ?? REGLAGES_ENCODAGE_DEFAUT.bed_kbps,
+    },
     sortie: {},
     transcription: null,
   };

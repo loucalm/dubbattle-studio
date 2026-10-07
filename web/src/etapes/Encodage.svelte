@@ -6,7 +6,14 @@
   import { dateLisible, tailleLisible } from "../lib/outils.ts";
   import type { ProjetOuvert } from "../lib/projet.svelte.ts";
   import { studio } from "../lib/studio.svelte.ts";
-  import { estimerTailles, ipsCible, REGLAGES_ENCODAGE_DEFAUT, TAILLE_MAX_FICHIER } from "../../../commun/encodage.ts";
+  import {
+    DEBITS_BED_POSSIBLES,
+    DEBITS_VOICE_POSSIBLES,
+    estimerTailles,
+    ipsCible,
+    REGLAGES_ENCODAGE_DEFAUT,
+    TAILLE_MAX_FICHIER,
+  } from "../../../commun/encodage.ts";
   import { dureeExtrait } from "../../../commun/publication.ts";
   import { FICHIERS_MEDIAS, MEDIAS, type Media, type ReglagesEncodage } from "../../../commun/types.ts";
 
@@ -18,12 +25,12 @@
   let reglages = $state<ReglagesEncodage>({ ...p.encodage });
   let recaler = $state(true);
 
-  const DESCRIPTIONS: Record<Media, string> = {
+  const descriptions = $derived<Record<Media, string>>({
     video: "H.264 High, sans audio, CRF, image clé chaque seconde et au début de chaque réplique, faststart",
-    voice: "AAC mono 48 kHz, 48 kbps",
-    bed: "AAC stéréo 48 kHz, 96 kbps",
+    voice: `AAC mono 48 kHz, ${p.encodage.voice_kbps} kbps`,
+    bed: `AAC stéréo 48 kHz, ${p.encodage.bed_kbps} kbps`,
     vignette: "WebP 640 px, qualité 80",
-  };
+  });
 
   const tache = $derived(studio.derniereTache(p.id, "encodage"));
   const enCours = $derived(tache?.etat === "en_cours" || tache?.etat === "attente");
@@ -32,7 +39,11 @@
   const aFaire = $derived(d.a_encoder.length > 0 || (imagesCles && recaler));
   const bloque = $derived(MEDIAS.some((m) => etats[m].etat === "bloque"));
   const modifies = $derived(
-    reglages.hauteur !== p.encodage.hauteur || reglages.crf !== p.encodage.crf || reglages.debit_max !== p.encodage.debit_max,
+    reglages.hauteur !== p.encodage.hauteur ||
+      reglages.crf !== p.encodage.crf ||
+      reglages.debit_max !== p.encodage.debit_max ||
+      reglages.voice_kbps !== p.encodage.voice_kbps ||
+      reglages.bed_kbps !== p.encodage.bed_kbps,
   );
 
   const estimation = $derived(
@@ -74,7 +85,7 @@
           <tr>
             <td>
               <strong class="mono">{FICHIERS_MEDIAS[m]}</strong>
-              <div class="discret petit">{DESCRIPTIONS[m]}</div>
+              <div class="discret petit">{descriptions[m]}</div>
             </td>
             <td class={e.classe}>{e.texte}</td>
             <td class:erreur={!!sortie && sortie.taille_octets > TAILLE_MAX_FICHIER}>
@@ -134,6 +145,27 @@
       Plafond du débit vidéo, en bits par seconde (2M = 2 Mbit/s). Sur les scènes très agitées (explosions, confettis,
       grain), l'encodeur ne le dépasse pas : la qualité y baisse un peu, mais la taille reste garantie (2M ≈ 15 Mo par
       minute au pire).
+    </p>
+    <label class="champ">
+      Débit de la voice (mono)
+      <select bind:value={reglages.voice_kbps}>
+        {#each DEBITS_VOICE_POSSIBLES as kbps (kbps)}
+          <option value={kbps}>{kbps} kbps{kbps === REGLAGES_ENCODAGE_DEFAUT.voice_kbps ? " (par défaut)" : ""}</option>
+        {/each}
+      </select>
+    </label>
+    <label class="champ">
+      Débit du bed (stéréo)
+      <select bind:value={reglages.bed_kbps}>
+        {#each DEBITS_BED_POSSIBLES as kbps (kbps)}
+          <option value={kbps}>{kbps} kbps{kbps === REGLAGES_ENCODAGE_DEFAUT.bed_kbps ? " (par défaut)" : ""}</option>
+        {/each}
+      </select>
+    </label>
+    <p class="discret petit explication">
+      Un débit plus bas allège le téléchargement (environ 0,35 Mo par minute de voice à 48 kbps, 0,7 Mo de bed à 96 kbps)
+      mais pas la mémoire du jeu, qui décode le son en PCM. Sous 40 kbps pour la voice ou 80 kbps pour le bed, le son
+      devient métallique. Seuls les fichiers audio sont refaits.
     </p>
     <div class="estimation">
       <div class="ligne">

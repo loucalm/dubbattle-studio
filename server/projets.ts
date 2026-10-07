@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { REGLAGES_ENCODAGE_DEFAUT } from "../commun/encodage.ts";
 import { config } from "./config.ts";
 import { diffuser } from "./evenements.ts";
 import { FICHIERS_MEDIAS, type Media, type Projet, type ResumeProjet } from "../commun/types.ts";
@@ -70,6 +71,7 @@ export async function lireProjet(id: string): Promise<Projet> {
   const projet = JSON.parse(texte) as Projet;
   // projets créés par une version précédente du Studio
   projet.imports ??= [];
+  projet.encodage = { ...REGLAGES_ENCODAGE_DEFAUT, ...projet.encodage };
   cache.set(id, projet);
   return structuredClone(projet);
 }

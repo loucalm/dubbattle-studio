@@ -157,6 +157,10 @@ export interface ReglagesEncodage {
   hauteur: number;
   crf: number;
   debit_max: string;
+  /** débit AAC de la voice (mono), en kbit/s */
+  voice_kbps: number;
+  /** débit AAC du bed (stéréo), en kbit/s */
+  bed_kbps: number;
 }
 
 /** Un média encodé, prêt à publier. */
@@ -267,7 +271,7 @@ export interface FabricationJson {
   bed: PisteFabrication;
   gain_db: number;
   vignette_ms: number;
-  encodage: ReglagesEncodage & { ips?: number };
+  encodage: Omit<ReglagesEncodage, "voice_kbps" | "bed_kbps"> & Partial<Pick<ReglagesEncodage, "voice_kbps" | "bed_kbps">> & { ips?: number };
   studio: string;
 }
 
