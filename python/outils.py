@@ -26,6 +26,7 @@ print(
             "python": platform.python_version(),
             "audio_separator": version("audio-separator"),
             "faster_whisper": version("faster-whisper"),
+            "yt_dlp": version("yt-dlp"),
             "cuda": cuda,
         }
     )

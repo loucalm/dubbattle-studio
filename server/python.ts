@@ -12,6 +12,7 @@ export interface EtatPython {
   python: string | null;
   audio_separator: string | null;
   faster_whisper: string | null;
+  yt_dlp: string | null;
   cuda: boolean;
 }
 
@@ -20,7 +21,7 @@ export async function etatPython(): Promise<EtatPython> {
     const { stdout } = await executer(config.python, [join(dossierPython, "outils.py")], { env: envPython });
     return JSON.parse(stdout.trim().split(/\r?\n/).pop() ?? "{}") as EtatPython;
   } catch {
-    return { python: null, audio_separator: null, faster_whisper: null, cuda: false };
+    return { python: null, audio_separator: null, faster_whisper: null, yt_dlp: null, cuda: false };
   }
 }
 

@@ -32,6 +32,8 @@ export interface OptionsExecution {
   binaire?: boolean;
   /** codes de sortie considérés comme un succès */
   codesOk?: number[];
+  /** l'annulation arrête aussi les processus lancés par celui-ci (ffmpeg lancé par yt-dlp…) */
+  arbre?: boolean;
 }
 
 export interface ResultatExecution {
@@ -66,6 +68,8 @@ export function executer(commande: string, args: string[], options: OptionsExecu
       env: options.env ?? process.env,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
+      // hors Windows, un groupe de processus à lui, pour tous les arrêter d'un coup
+      detached: !!options.arbre && process.platform !== "win32",
     });
 
     const morceaux: Buffer[] = [];
@@ -86,7 +90,18 @@ export function executer(commande: string, args: string[], options: OptionsExecu
       lignesErreur.ajouter(texte);
     });
 
-    const annuler = () => enfant.kill();
+    const annuler = () => {
+      if (!options.arbre || enfant.pid === undefined) return void enfant.kill();
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(enfant.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => enfant.kill());
+      } else {
+        try {
+          process.kill(-enfant.pid, "SIGTERM");
+        } catch {
+          enfant.kill();
+        }
+      }
+    };
     options.signal?.addEventListener("abort", annuler, { once: true });
 
     enfant.on("error", (e: NodeJS.ErrnoException) => {

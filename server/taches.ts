@@ -9,8 +9,8 @@ import type { Tache, TypeTache } from "../commun/types.ts";
 export interface ContexteTache {
   signal: AbortSignal;
   progression: (valeur: number | null, detail?: string) => void;
-  /** message affiché une fois la tâche réussie (sinon « Terminé ») */
-  terminer: (message: string) => void;
+  /** message affiché une fois la tâche réussie (sinon « Terminé »), et fichier produit s'il y en a un */
+  terminer: (message: string, fichier?: string) => void;
 }
 
 interface Entree {
@@ -40,9 +40,13 @@ async function executerEntree(entree: Entree): Promise<void> {
   tache.etat = "en_cours";
   publier(entree, true);
   let resultat: string | null = null;
+  let fichier: string | null = null;
   try {
     await entree.travail({
-      terminer: (message) => (resultat = message),
+      terminer: (message, produit) => {
+        resultat = message;
+        fichier = produit ?? null;
+      },
       signal: controleur.signal,
       progression: (valeur, detail) => {
         tache.progression = valeur === null ? null : Math.max(0, Math.min(1, valeur));
@@ -54,6 +58,7 @@ async function executerEntree(entree: Entree): Promise<void> {
     if (tache.etat === "ok") {
       tache.progression = 1;
       tache.detail = resultat;
+      tache.fichier = fichier;
     }
   } catch (e) {
     if (e instanceof Annulation || controleur.signal.aborted) {
@@ -105,6 +110,7 @@ export function lancerTache(definition: DefinitionTache, travail: (ctx: Contexte
     progression: null,
     detail: null,
     erreur: null,
+    fichier: null,
     cree_le: new Date().toISOString(),
     fin_le: null,
   };

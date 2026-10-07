@@ -7,6 +7,7 @@ import type {
   ContenuDossier,
   DetailProjet,
   EtatServeur,
+  InfosVideoEnLigne,
   ModificationProjet,
   Projet,
   ResultatControle,
@@ -78,6 +79,10 @@ export const api = {
       fichier,
       progression,
     ),
+  /** Vidéo en ligne (YouTube…) : titre, durée, vignette, avant téléchargement. */
+  infosEnLigne: (adresse: string) => requete<InfosVideoEnLigne>("POST", "/api/en-ligne/infos", { adresse }),
+  telecharger: (d: { adresse: string; id: string; titre: string; passage: { debut_ms: number; fin_ms: number } | null }) =>
+    requete<Tache>("POST", "/api/en-ligne/telecharger", d),
   annulerTache: (id: string) => requete<{ ok: boolean }>("POST", `/api/taches/${id}/annuler`, {}),
 
   creerProjet: (chemin: string, titre: string) => requete<Projet>("POST", "/api/projets", { chemin, titre }),

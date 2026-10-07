@@ -1,8 +1,10 @@
 <script lang="ts">
-  // Étape 1 : choisir une vidéo source (fenêtre « Ouvrir » de Windows, glisser-déposer ou chemin
-  // collé), lui donner un titre, et créer le projet. L'identifiant est tiré du titre.
+  // Étape 1 : choisir une vidéo source (fenêtre « Ouvrir » de Windows, glisser-déposer, chemin
+  // collé ou adresse YouTube), lui donner un titre, et créer le projet. L'identifiant est tiré du titre.
+  import BarreTache from "./BarreTache.svelte";
   import Explorateur from "./Explorateur.svelte";
   import Modale from "./Modale.svelte";
+  import TelechargementEnLigne from "./TelechargementEnLigne.svelte";
   import { api } from "../lib/api.ts";
   import { tailleLisible } from "../lib/outils.ts";
   import { studio } from "../lib/studio.svelte.ts";
@@ -18,24 +20,50 @@
   let choisi = $state<string | null>(null);
   let titre = $state("");
   let creation = $state(false);
+  let adresseSaisie = $state("");
+  let enLigne = $state<string | null>(null);
+  let telechargement = $state<{ tache: string; titre: string } | null>(null);
 
   const nomFichier = (chemin: string) => chemin.split(/[\\/]/).pop() ?? chemin;
   const identifiant = $derived(versIdentifiant(titre));
 
-  function choisir(chemin: string) {
+  function choisir(chemin: string, titreConnu?: string) {
     chemin = chemin.trim().replace(/^"|"$/g, "");
     if (!chemin) return;
     explorateur = false;
+    enLigne = null;
+    telechargement = null;
     candidats = [];
     introuvable = null;
     message = null;
     choisi = chemin;
     // titre proposé : le nom du fichier, sans extension ni séparateurs
-    titre = nomFichier(chemin)
-      .replace(/\.[^.]+$/, "")
-      .replace(/[._]+/g, " ")
+    titre = (
+      titreConnu ??
+      nomFichier(chemin)
+        .replace(/\.[^.]+$/, "")
+        .replace(/[._]+/g, " ")
+    )
       .trim()
       .slice(0, 100);
+  }
+
+  // vidéo en ligne téléchargée (fenêtre fermée ou non) : on passe à la création du projet
+  const tacheEnLigne = $derived(telechargement ? studio.taches.find((t) => t.id === telechargement!.tache) : undefined);
+  $effect(() => {
+    if (!telechargement || !tacheEnLigne) return;
+    if (tacheEnLigne.etat === "ok" && tacheEnLigne.fichier) choisir(tacheEnLigne.fichier, telechargement.titre);
+    else if (tacheEnLigne.etat === "erreur" || tacheEnLigne.etat === "annulee") telechargement = null;
+  });
+
+  function ouvrirAdresse(adresse: string) {
+    adresse = adresse.trim();
+    if (!/^https?:\/\//i.test(adresse)) {
+      message = { texte: "Colle l'adresse complète de la vidéo (https://…).", niveau: "erreur" };
+      return;
+    }
+    message = null;
+    enLigne = adresse;
   }
 
   async function parcourir() {
@@ -55,6 +83,9 @@
     e.preventDefault();
     survol = false;
     const fichier = e.dataTransfer?.files[0];
+    // lien glissé depuis le navigateur (barre d'adresse, miniature YouTube…)
+    const lien = e.dataTransfer?.getData("text/uri-list").split(/\r?\n/).find((l) => /^https?:\/\//i.test(l));
+    if (!fichier && lien) return ouvrirAdresse(lien);
     if (!fichier) return;
     candidats = [];
     introuvable = null;
@@ -115,7 +146,9 @@
   ondrop={deposer}
 >
   <div class="grand">Glisse une vidéo ici</div>
-  <div class="discret petit">mp4, mkv, mov, webm… La source reste à sa place : rien n'est copié.</div>
+  <div class="discret petit">
+    mp4, mkv, mov, webm… La source reste à sa place : rien n'est copié. Un lien YouTube glissé est téléchargé.
+  </div>
   <div class="ligne centre">
     <button class="principal" onclick={parcourir}>Parcourir…</button>
     <span class="discret petit">ou</span>
@@ -130,6 +163,23 @@
       <button type="submit" disabled={!cheminSaisi.trim()}>OK</button>
     </form>
   </div>
+  <form
+    class="ligne centre"
+    onsubmit={(e) => {
+      e.preventDefault();
+      ouvrirAdresse(adresseSaisie);
+    }}
+  >
+    <span class="discret petit">ou depuis YouTube</span>
+    <input class="mono chemin" bind:value={adresseSaisie} placeholder="Coller l'adresse de la vidéo" spellcheck="false" />
+    <button type="submit" disabled={!adresseSaisie.trim() || !studio.serveur?.outils.yt_dlp}>Télécharger…</button>
+  </form>
+  {#if studio.serveur && !studio.serveur.outils.yt_dlp}
+    <p class="discret petit">yt-dlp n'est pas installé : lance <code>npm run ytdlp:maj</code> dans le dossier du Studio.</p>
+  {/if}
+  {#if tacheEnLigne && !enLigne}
+    <div class="suivi"><div class="petit">{tacheEnLigne.libelle}</div><BarreTache tache={tacheEnLigne} /></div>
+  {/if}
   {#if message}<p class="message {message.niveau}">{message.texte}</p>{/if}
   {#each candidats as c (c)}
     <button class="discret petit" onclick={() => choisir(c)}>{c}</button>
@@ -151,7 +201,16 @@
 </div>
 
 {#if explorateur}
-  <Explorateur onfermer={() => (explorateur = false)} onchoisir={choisir} />
+  <Explorateur onfermer={() => (explorateur = false)} onchoisir={(c) => choisir(c)} />
+{/if}
+
+{#if enLigne}
+  <TelechargementEnLigne
+    adresse={enLigne}
+    onfermer={() => (enLigne = null)}
+    onlance={(tache, t) => (telechargement = { tache, titre: t })}
+    onfini={(chemin, t) => choisir(chemin, t)}
+  />
 {/if}
 
 {#if choisi}
@@ -213,6 +272,11 @@
   }
   .source {
     word-break: break-all;
+  }
+  .suivi {
+    width: 420px;
+    max-width: 100%;
+    text-align: left;
   }
   .introuvable {
     max-width: 640px;

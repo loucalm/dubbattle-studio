@@ -70,6 +70,7 @@
           <tr><td>Python (studio/.venv)</td><td class:ok={!!o.python} class:erreur={!o.python}>{o.python ?? "absent : npm run python:installer"}</td></tr>
           <tr><td>audio-separator (Demucs, UVR)</td><td class:ok={!!o.audio_separator} class:erreur={!o.audio_separator}>{o.audio_separator ?? "absent"}</td></tr>
           <tr><td>faster-whisper</td><td class:ok={!!o.faster_whisper} class:attention={!o.faster_whisper}>{o.faster_whisper ?? "absent"}</td></tr>
+          <tr><td>yt-dlp (YouTube)</td><td class:ok={!!o.yt_dlp} class:attention={!o.yt_dlp}>{o.yt_dlp ?? "absent"}</td></tr>
           <tr><td>GPU CUDA</td><td class:ok={o.cuda}>{o.cuda ? "oui" : "non (plus lent)"}</td></tr>
           <tr><td>git</td><td class:ok={!!o.git} class:erreur={!o.git}>{o.git ?? "absent"}</td></tr>
         </tbody>

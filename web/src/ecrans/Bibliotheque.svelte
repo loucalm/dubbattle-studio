@@ -70,6 +70,7 @@
       <span class="pastille" class:ok={!!o.ffmpeg} class:erreur={!o.ffmpeg}>ffmpeg</span>
       <span class="pastille" class:ok={!!o.audio_separator} class:erreur={!o.audio_separator}>séparation</span>
       <span class="pastille" class:ok={!!o.faster_whisper} class:attention={!o.faster_whisper}>Whisper</span>
+      <span class="pastille" class:ok={!!o.yt_dlp} class:attention={!o.yt_dlp}>YouTube</span>
       <span class="pastille" class:ok={o.cuda}>{o.cuda ? "GPU" : "sans GPU"}</span>
       <span class="pastille" class:ok={!!o.git} class:erreur={!o.git}>git</span>
     {/if}

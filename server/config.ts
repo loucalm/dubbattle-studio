@@ -38,6 +38,8 @@ export const config = {
   git: env.GIT ?? "git",
   /** modèle Whisper pour la transcription */
   modeleWhisper: env.MODELE_WHISPER ?? "large-v3-turbo",
+  /** navigateur dont yt-dlp reprend les cookies (vidéos réservées aux comptes connectés), vide = aucun */
+  cookiesNavigateur: env.COOKIES_NAVIGATEUR ?? null,
   /** le Studio n'écoute que la machine locale */
   hote: "127.0.0.1",
 };

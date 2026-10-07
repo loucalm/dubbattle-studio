@@ -11,7 +11,9 @@ npm install
 npm run python:installer
 ```
 
-Le second script crée `studio/.venv` (Python 3.12) et installe la séparation (audio-separator : Demucs et modèles UVR) et la transcription (faster-whisper), en version GPU si une carte NVIDIA est présente. Compter quelques Go.
+Le second script crée `studio/.venv` (Python 3.12) et installe la séparation (audio-separator : Demucs et modèles UVR), la transcription (faster-whisper) et le téléchargement depuis YouTube (yt-dlp), en version GPU si une carte NVIDIA est présente. Compter quelques Go.
+
+Quand un téléchargement YouTube échoue sur une adresse valide, YouTube a sans doute changé : `npm run ytdlp:maj` met yt-dlp à jour (lui seul, en quelques secondes).
 
 ## Lancement
 
@@ -23,7 +25,7 @@ Puis ouvrir http://localhost:5180.
 
 ## Les 8 étapes
 
-1. **Import** : « Parcourir… » (fenêtre « Ouvrir » de Windows), glisser une vidéo dans la fenêtre, ou coller son chemin, puis lui donner un titre. La vidéo reste à sa place ; le Studio garde son empreinte. Un fichier glissé est retrouvé dans Téléchargements, Vidéos, Bureau, Documents et les dossiers déclarés dans **Réglages** ; sinon, le Studio propose d'en faire une copie.
+1. **Import** : « Parcourir… » (fenêtre « Ouvrir » de Windows), glisser une vidéo dans la fenêtre, coller son chemin, ou coller (ou glisser) une adresse YouTube, puis lui donner un titre. Une vidéo YouTube est téléchargée dans `studio-workspace/_sources/`, entière (jusqu'en 1080p, H.264 + AAC en MP4 si YouTube le propose) ou seulement un passage, sans réencodage. La vidéo reste à sa place ; le Studio garde son empreinte. Un fichier glissé est retrouvé dans Téléchargements, Vidéos, Bureau, Documents et les dossiers déclarés dans **Réglages** ; sinon, le Studio propose d'en faire une copie.
 2. **Découpe** : entrée et sortie à l'image près (`I`, `O`, flèches, `L` pour lire la sélection), ou « Tout sélectionner ».
 3. **Voix et fond** : lancer un ou plusieurs modèles, comparer à l'oreille (touches `1` à `9`), garder la meilleure voice et le meilleur bed. Chaque piste se télécharge (⬇) pour être retouchée dans un autre logiciel, puis se réimporte (« Importer une voice / un bed ») : le Studio la recale sur l'original.
 4. **Répliques** : dessiner les zones sur la forme d'onde, ou les proposer avec « Détecter la parole » et « Transcrire (Whisper) ». Personnage avec `1` à `9`, image par image avec `←` `→` (`Maj` : 1 s). « Aperçu au survol » et « Son image par image » s'activent et se désactivent dans la barre.

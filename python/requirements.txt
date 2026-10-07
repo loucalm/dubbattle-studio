@@ -3,3 +3,6 @@
 audio-separator==0.47.0
 faster-whisper==1.2.1
 audioread==3.1.0
+# yt-dlp : téléchargement depuis YouTube. Pas de version figée : YouTube change souvent, il faut
+# la dernière (« npm run ytdlp:maj »). [default] ajoute yt-dlp-ejs, que yt-dlp fait tourner avec Node.
+yt-dlp[default]

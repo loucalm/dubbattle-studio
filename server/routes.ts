@@ -15,6 +15,7 @@ import { chemins, ErreurHttp, lireProjet, listerProjets, projetExiste, renommerP
 import { apercuPublication, lancerPublication, lancerRetrait } from "./publication.ts";
 import { exporterPiste, recevoirImport, supprimerImport, validerImport } from "./retouche.ts";
 import { etatPython } from "./python.ts";
+import { infosVideo, lancerTelechargement } from "./youtube.ts";
 import { annulerTache, annulerTachesProjet, listerTaches, tachesActives } from "./taches.ts";
 import {
   appliquerModification,
@@ -77,6 +78,7 @@ async function detecterOutils(): Promise<EtatOutils> {
     python: python.python,
     audio_separator: python.audio_separator,
     faster_whisper: python.faster_whisper,
+    yt_dlp: python.yt_dlp,
     cuda: python.cuda,
   };
 }
@@ -133,6 +135,22 @@ routeur.post("/api/televersement", async ({ req, query }) => {
   const taille = Number(query.get("taille"));
   if (!Number.isFinite(taille) || taille <= 0) throw new ErreurHttp(400, "Taille invalide.");
   return { chemin: await televerser(nom, taille, req) };
+});
+
+/** Vidéo en ligne (YouTube…) : infos, puis téléchargement dans _sources/ (tâche de fond). */
+routeur.post("/api/en-ligne/infos", async ({ corps }) => {
+  const { adresse } = (await corps()) as { adresse?: string };
+  return infosVideo(texte(adresse, "adresse"));
+});
+
+routeur.post("/api/en-ligne/telecharger", async ({ corps }) => {
+  const { adresse, id, titre, passage } = (await corps()) as {
+    adresse?: string;
+    id?: string;
+    titre?: string;
+    passage?: { debut_ms: number; fin_ms: number } | null;
+  };
+  return lancerTelechargement({ adresse: texte(adresse, "adresse"), id, titre, passage });
 });
 
 routeur.get("/api/taches", () => listerTaches());

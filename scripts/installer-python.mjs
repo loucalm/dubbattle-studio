@@ -3,6 +3,7 @@
 //   avec les DLL CUDA fournies par torch). Sinon : versions processeur.
 // - faster-whisper installe onnxruntime (processeur), qui masquerait onnxruntime-gpu : on le retire.
 // Usage : npm run python:installer [-- --cpu]
+//         npm run ytdlp:maj (met seulement yt-dlp à jour, à faire quand YouTube casse le téléchargement)
 
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -36,11 +37,17 @@ if (!existe("uv")) {
   process.exit(1);
 }
 
-const gpu = !process.argv.includes("--cpu") && existe("nvidia-smi");
-console.log(gpu ? "Carte NVIDIA détectée : installation GPU (CUDA 12.8)." : "Installation processeur (sans GPU).");
-
 if (!existsSync(python)) lancer("uv", ["venv", ".venv", "--python", "3.12"]);
 const pip = (...args) => lancer("uv", ["pip", "install", "--python", python, ...args]);
+
+if (process.argv.includes("--ytdlp")) {
+  pip("--upgrade", "yt-dlp[default]");
+  console.log("\nyt-dlp à jour.");
+  process.exit(0);
+}
+
+const gpu = !process.argv.includes("--cpu") && existe("nvidia-smi");
+console.log(gpu ? "Carte NVIDIA détectée : installation GPU (CUDA 12.8)." : "Installation processeur (sans GPU).");
 
 pip("torch", "--index-url", `https://download.pytorch.org/whl/${gpu ? "cu128" : "cpu"}`);
 pip("-r", "python/requirements.txt");

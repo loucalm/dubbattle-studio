@@ -1,8 +1,8 @@
 // Tout ce qui passe par ffmpeg / ffprobe. Réglages de référence : fiche technique, section 7.8.
 
 import { open, rename, rm, stat } from "node:fs/promises";
-import { basename } from "node:path";
-import { config } from "./config.ts";
+import { basename, join } from "node:path";
+import { config, dossierPython } from "./config.ts";
 import { executer } from "./processus.ts";
 import { argumentImagesCles, debitEnBits, ipsCible } from "../commun/encodage.ts";
 import type { Decoupe, InfosSource, PisteAudioSource, ReglagesEncodage } from "../commun/types.ts";
@@ -499,8 +499,19 @@ export async function encoderPisteAudio(
   );
 }
 
+let libwebp: Promise<boolean> | null = null;
+
+/** L'encodeur WebP de ffmpeg (absent du ffmpeg de Homebrew depuis la version 8). */
+function libwebpDisponible(): Promise<boolean> {
+  libwebp ??= executer(config.ffmpeg, ["-hide_banner", "-encoders"]).then(
+    ({ stdout }) => /^\s*V\S*\s+libwebp\s/m.test(stdout),
+    () => false,
+  );
+  return libwebp;
+}
+
 export async function encoderVignette(source: InfosSource, instantMs: number, dest: string, suivi: Suivi): Promise<void> {
-  await versFichier(dest, (temp) =>
+  const image = (sortie: string, encodeur: string[]) =>
     ffmpegSuivi(
       [
         "-ss",
@@ -513,16 +524,28 @@ export async function encoderVignette(source: InfosSource, instantMs: number, de
         "1",
         "-vf",
         filtreImage(source, { largeur: 640 }),
-        "-c:v",
-        "libwebp",
-        "-quality",
-        "80",
-        temp,
+        ...encodeur,
+        sortie,
       ],
       0,
       suivi,
-    ),
-  );
+    );
+  if (await libwebpDisponible()) {
+    await versFichier(dest, (temp) => image(temp, ["-c:v", "libwebp", "-quality", "80"]));
+    return;
+  }
+  // sans libwebp : image PNG (sans perte) par ffmpeg, puis WebP qualité 80 par Pillow (studio/.venv)
+  await versFichier(dest, async (temp) => {
+    const png = `${temp}.png`;
+    try {
+      await image(png, ["-c:v", "png"]);
+      await executer(config.python, [join(dossierPython, "webp.py"), "--entree", png, "--sortie", temp, "--qualite", "80"], {
+        signal: suivi.signal,
+      });
+    } finally {
+      await rm(png, { force: true });
+    }
+  });
 }
 
 /** Pour les messages : « video.mp4 (3,2 Mo) ». */

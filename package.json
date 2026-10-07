@@ -10,7 +10,8 @@
     "build": "vite build",
     "check": "tsc -p tsconfig.json --noEmit && svelte-check --tsconfig web/tsconfig.json",
     "test": "vitest run",
-    "python:installer": "node scripts/installer-python.mjs"
+    "python:installer": "node scripts/installer-python.mjs",
+    "ytdlp:maj": "node scripts/installer-python.mjs --ytdlp"
   },
   "engines": {
     "node": ">=22"

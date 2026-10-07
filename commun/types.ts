@@ -300,7 +300,8 @@ export type TypeTache =
   | "encodage"
   | "publication"
   | "deploiement"
-  | "recherche_source";
+  | "recherche_source"
+  | "telechargement";
 
 export type EtatTache = "attente" | "en_cours" | "ok" | "erreur" | "annulee";
 
@@ -314,6 +315,8 @@ export interface Tache {
   progression: number | null;
   detail: string | null;
   erreur: string | null;
+  /** fichier produit par la tâche (vidéo téléchargée), une fois réussie */
+  fichier: string | null;
   cree_le: string;
   fin_le: string | null;
 }
@@ -328,8 +331,25 @@ export interface EtatOutils {
   python: string | null;
   audio_separator: string | null;
   faster_whisper: string | null;
+  yt_dlp: string | null;
   git: string | null;
   cuda: boolean;
+}
+
+/** Vidéo en ligne (YouTube…) avant téléchargement, lue par yt-dlp. */
+export interface InfosVideoEnLigne {
+  adresse: string;
+  id: string;
+  /** site d'origine selon yt-dlp (« Youtube »…) */
+  site: string | null;
+  titre: string;
+  chaine: string | null;
+  duree_ms: number | null;
+  vignette: string | null;
+  /** plus grande hauteur d'image proposée */
+  hauteur: number | null;
+  /** chemin du fichier si la vidéo entière est déjà dans _sources/ */
+  deja: string | null;
 }
 
 export interface ModeleSeparation {
